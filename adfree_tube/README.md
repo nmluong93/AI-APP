@@ -596,6 +596,10 @@ function to `api` in `_script` and a Dart method that calls it through
 - `flutter run` then press `v` (or use the Flutter extension) to open
   **DevTools**, which has a widget inspector, network log and performance view.
 - Android native logs: `adb logcat | grep -i -E "flutter|chromium|audioservice"`.
+- **Long-press the video** in any build (including release) to get a
+  copyable report of the page's player: muted state, volume, which `<video>`
+  elements exist, their size on screen and decode state. It comes from
+  `api.debug()` in `_script`.
 - **Inspect the YouTube page itself.** Debug builds let Chrome on your
   computer attach to the app's WebView: connect the phone with USB debugging
   on, open `chrome://inspect` in desktop Chrome, and click **inspect** under
@@ -612,6 +616,7 @@ function to `api` in `_script` and a Dart method that calls it through
 
 | Problem | Fix |
 | --- | --- |
+| Time moves but there's no picture or sound | Long-press the video, tap **Copy** in *Player diagnostics*, and look at the `videos` list: `muted`, `size` (0x0 means no frames decoded) and `rect`/`display` (whether it's on screen) |
 | Video stuck loading, or a YouTube error shows under the player | Copy the error text and see [When playback stops working](#when-playback-stops-working). Try another video first: some are blocked from playing outside youtube.com |
 | Ads play instead of being skipped, or parts of the YouTube site show over the video | YouTube changed its page. Update the selectors in `_css` / `skipAds()` in `lib/yt_web_player.dart` (see [Debugging tips](#debugging-tips)) |
 | Search shows *"Search failed"* | Check your internet connection. If it persists, update `youtube_explode_dart` |

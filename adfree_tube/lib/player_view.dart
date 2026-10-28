@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 import 'playback.dart';
 import 'widgets.dart';
@@ -66,6 +67,50 @@ class _VideoSurfaceState extends State<VideoSurface> {
     VideoSurface.fullscreenActive.value = false;
   }
 
+  Widget _webView() {
+    final controller = _c.player.controller;
+    // Android's default way of embedding the WebView (a texture) can show
+    // web video as a black box; hybrid composition draws it reliably.
+    if (controller.platform is AndroidWebViewController) {
+      return WebViewWidget.fromPlatformCreationParams(
+        params: AndroidWebViewWidgetCreationParams(
+          controller: controller.platform,
+          displayWithHybridComposition: true,
+        ),
+      );
+    }
+    return WebViewWidget(controller: controller);
+  }
+
+  Future<void> _showDiagnostics() async {
+    final text = await _c.player.diagnostics();
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Player diagnostics'),
+        content: SingleChildScrollView(
+          child: SelectableText(text,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 11)),
+        ),
+        actions: [
+          TextButton.icon(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: text));
+              if (context.mounted) Navigator.of(context).pop();
+            },
+            icon: const Icon(Icons.copy, size: 18),
+            label: const Text('Copy'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<bool>(
@@ -77,13 +122,13 @@ class _VideoSurfaceState extends State<VideoSurface> {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              if (showWebView)
-                WebViewWidget(controller: _c.player.controller),
+              if (showWebView) _webView(),
               // Covers the page so it never gets touches.
               GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: _toggleControls,
                 onDoubleTap: () => _c.player.playOrPause(),
+                onLongPress: _showDiagnostics,
               ),
               ValueListenableBuilder<YtPlayerState>(
                 valueListenable: _c.player,

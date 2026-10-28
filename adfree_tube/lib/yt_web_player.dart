@@ -156,6 +156,33 @@ class YtWebPlayer extends ValueNotifier<YtPlayerState> {
   Future<void> setQuality(String quality) =>
       _cmd('setQuality(${jsonEncode(quality)})');
 
+  /// A readable report of what the page's player is doing, for bug reports.
+  Future<String> diagnostics() async {
+    try {
+      final result = await controller.runJavaScriptReturningResult(
+          'window.__adfree ? window.__adfree.debug() : "Player script not loaded"');
+      var text = result is String ? result : result.toString();
+      // Android returns the string JSON-encoded a second time.
+      if (text.startsWith('"')) {
+        try {
+          text = jsonDecode(text) as String;
+        } catch (_) {}
+      }
+      return 'Video: $_videoId\nState: ${jsonEncode(_stateJson())}\n$text';
+    } catch (e) {
+      return 'Could not read the player: $e';
+    }
+  }
+
+  Map<String, Object?> _stateJson() => {
+        'playing': value.playing,
+        'buffering': value.buffering,
+        'ad': value.ad,
+        'position': value.position.inSeconds,
+        'duration': value.duration.inSeconds,
+        'error': value.error,
+      };
+
   double get volume => _volume;
   Future<void> setVolume(double v) {
     _volume = v.clamp(0, 1);
@@ -226,7 +253,11 @@ ytm-pivot-bar-renderer, .mobile-topbar-header, ytm-app-promo-renderer,
     (document.head || document.documentElement).appendChild(style);
   }
 
-  const video = () => document.querySelector('video');
+  // The main player's <video>, not a muted preview elsewhere on the page.
+  const video = () =>
+    document.querySelector('#movie_player video') ||
+    document.querySelector('video.html5-main-video') ||
+    document.querySelector('video');
   const player = () => document.getElementById('movie_player');
 
   let wantPlaying = true;
@@ -244,6 +275,53 @@ ytm-pivot-bar-renderer, .mobile-topbar-header, ytm-app-promo-renderer,
     if (p.setPlaybackQuality) p.setPlaybackQuality(q);
   };
 
+  // YouTube's mobile site starts videos muted ("Tap to unmute"), and the
+  // app never lets taps reach the page, so turn the sound on ourselves.
+  function unmute(p, el) {
+    try {
+      if (p && p.isMuted && p.isMuted()) p.unMute();
+      if (p && p.getVolume && p.getVolume() === 0) p.setVolume(100);
+    } catch (e) {}
+    if (el) {
+      if (el.muted) el.muted = false;
+      if (Math.abs(el.volume - volume) > 0.01) el.volume = volume;
+    }
+  }
+
+  // Everything useful for working out why the video doesn't show or play.
+  api.debug = () => {
+    const p = player();
+    const info = {
+      url: location.href,
+      title: document.title,
+      hidden: document.hidden,
+      playerClasses: p ? p.className : null,
+      playerMuted: p && p.isMuted ? p.isMuted() : null,
+      playerVolume: p && p.getVolume ? p.getVolume() : null,
+      playerState: p && p.getPlayerState ? p.getPlayerState() : null,
+      quality: p && p.getPlaybackQuality ? p.getPlaybackQuality() : null,
+      error: (document.querySelector('.ytp-error') || {}).innerText || null,
+      videos: Array.from(document.querySelectorAll('video')).map((v) => {
+        const r = v.getBoundingClientRect();
+        const cs = getComputedStyle(v);
+        return {
+          main: v === video(),
+          src: (v.currentSrc || v.src || '').slice(0, 40),
+          paused: v.paused, muted: v.muted, volume: v.volume,
+          readyState: v.readyState, networkState: v.networkState,
+          time: v.currentTime, duration: v.duration,
+          size: v.videoWidth + 'x' + v.videoHeight,
+          rect: [r.x, r.y, r.width, r.height].map(Math.round).join(','),
+          display: cs.display, visibility: cs.visibility, opacity: cs.opacity,
+          error: v.error ? v.error.code + ' ' + v.error.message : null,
+        };
+      }),
+      viewport: innerWidth + 'x' + innerHeight,
+      userAgent: navigator.userAgent,
+    };
+    return JSON.stringify(info, null, 1);
+  };
+
   function skipAds() {
     const p = player();
     const el = video();
@@ -258,6 +336,7 @@ ytm-pivot-bar-renderer, .mobile-topbar-header, ytm-app-promo-renderer,
       el.muted = false;
       el.volume = volume;
     }
+    if (!ad) unmute(p, el);
     document.querySelectorAll(
       '.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button, ' +
       '.ytp-ad-skip-button-container button, button.ytp-ad-skip-button-slot'
