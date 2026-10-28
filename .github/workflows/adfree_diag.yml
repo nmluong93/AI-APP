@@ -1,0 +1,28 @@
+name: AdFree Tube playback diagnostics
+on:
+  push:
+    branches: [diag-playback]
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: adfree_tube
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      - run: dart run tool/diag.dart aqz-KE-bpKQ
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq mpv >/dev/null
+      - name: mpv playback test
+        run: |
+          while read client kind url; do
+            for ua in libmpv "com.google.android.youtube/20.10.38 (Linux; U; Android 11) gzip" "com.google.android.apps.youtube.vr.oculus/1.56.21 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip"; do
+              start=$(date +%s)
+              timeout 40 mpv --no-config --vo=null --ao=null --length=15 --user-agent="$ua" "$url" >/tmp/mpv.log 2>&1
+              rc=$?
+              echo "$client $kind ua=${ua:0:20} rc=$rc took=$(( $(date +%s)-start ))s $(grep -iE 'error|403|failed' /tmp/mpv.log | head -2 | tr '\n' ' ')"
+            done
+          done < urls.txt
