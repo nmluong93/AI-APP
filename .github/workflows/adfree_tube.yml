@@ -1,0 +1,53 @@
+name: AdFree Tube build
+
+on:
+  push:
+    paths:
+      - 'adfree_tube/**'
+      - '.github/workflows/adfree_tube.yml'
+  pull_request:
+    paths:
+      - 'adfree_tube/**'
+      - '.github/workflows/adfree_tube.yml'
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: adfree_tube
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter build apk --release --split-per-abi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: adfree-tube-android
+          path: adfree_tube/build/app/outputs/flutter-apk/*.apk
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      - run: flutter build macos --release
+      - run: |
+          cd build/macos/Build/Products/Release
+          ditto -c -k --keepParent "AdFree Tube.app" AdFreeTube-macos.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: adfree-tube-macos
+          path: adfree_tube/build/macos/Build/Products/Release/AdFreeTube-macos.zip
