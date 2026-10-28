@@ -17,7 +17,7 @@ They show up in Samsung Gallery, Samsung Music, My Files and any other player. P
 
 Like the Mac app, this is a front end for **yt-dlp** and **ffmpeg**. On Android they come from the [youtubedl-android](https://github.com/yausername/youtubedl-android) library, which bundles Python, yt-dlp, ffmpeg and a small JavaScript engine (QuickJS, which recent yt-dlp needs for YouTube) inside the app. Nothing else needs to be installed on the phone.
 
-YouTube changes things often. When downloads start failing, open the **⋮** menu and tap **Update yt-dlp**. That downloads the newest yt-dlp straight onto the phone, no rebuild needed.
+YouTube changes things often, and an old yt-dlp gets **HTTP Error 403: Forbidden**. So the app updates yt-dlp (nightly build) by itself once a day when it starts, and if YouTube still answers 403 it updates and retries the download once. You can also update by hand: open the **⋮** menu and tap **Update yt-dlp**. Either way the newest yt-dlp goes straight onto the phone, no rebuild needed.
 
 ---
 
@@ -98,6 +98,7 @@ To update later, build again and install the new APK the same way. Your settings
 
 ## Troubleshooting
 
+- **"HTTP Error 403: Forbidden":** yt-dlp is out of date for YouTube's latest change. The app already tries an update and a retry; if it still fails, wait a day for a yt-dlp fix and tap **⋮ → Update yt-dlp**, then **Retry**.
 - **"Sign in to confirm you're not a bot", "format not available", or downloads suddenly fail:** tap **⋮ → Update yt-dlp** and try again. Switching from mobile data to Wi‑Fi (or the other way) can also help with the bot check.
 - **Gradle sync fails with "SDK location not found":** open the project from Android Studio (it fixes this itself), or create `local.properties` with `sdk.dir=/Users/YOUR_NAME/Library/Android/sdk`.
 - **"Unsupported class file major version" or other Java errors in Terminal:** run the `export JAVA_HOME=…` line from the Terminal section so Gradle uses Android Studio's Java.

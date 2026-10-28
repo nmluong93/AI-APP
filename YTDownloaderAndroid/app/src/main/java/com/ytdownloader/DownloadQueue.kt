@@ -103,18 +103,24 @@ object DownloadQueue {
             return
         }
 
-        val workDir = File(appContext.cacheDir, "downloads/$id").apply {
-            deleteRecursively()
-            mkdirs()
-        }
+        val workDir = File(appContext.cacheDir, "downloads/$id")
         val processId = "job-$id-${System.nanoTime()}"
         processIds[id] = processId
-        val progress = ProgressParser(job.options.kind)
 
         try {
-            val request = YtDlp.downloadRequest(job.entry, job.options, workDir)
-            YoutubeDL.getInstance().execute(request, processId) { _, _, line ->
-                progress.handle(line)?.let { update -> modify(id) { update(it) } }
+            try {
+                download(job, workDir, processId)
+            } catch (e: Exception) {
+                // YouTube answers 403 when yt-dlp is out of date. Get the newest yt-dlp and try once more.
+                if (id in cancelRequested || e is YoutubeDL.CanceledException || !e.isForbidden()) throw e
+                modify(id) { it.copy(state = JobState.Processing("YouTube blocked the download. Updating yt-dlp…"), progress = 0f, detail = "") }
+                if (!Engine.updateNow(appContext)) throw e
+                if (id in cancelRequested) {
+                    setState(id, JobState.Cancelled)
+                    return
+                }
+                modify(id) { it.copy(state = JobState.Downloading, progress = 0f, detail = "Retrying…") }
+                download(job, workDir, processId)
             }
             if (id in cancelRequested) {
                 setState(id, JobState.Cancelled)
@@ -146,13 +152,31 @@ object DownloadQueue {
             if (id in cancelRequested) {
                 setState(id, JobState.Cancelled)
             } else {
-                setState(id, JobState.Failed(YtDlp.cleanError(e.message, "Download failed.")))
+                val message = if (e.isForbidden()) {
+                    "YouTube refused the download (HTTP 403). Try again later, or tap ⋮ → Update yt-dlp and retry."
+                } else {
+                    YtDlp.cleanError(e.message, "Download failed.")
+                }
+                setState(id, JobState.Failed(message))
             }
         } finally {
             processIds.remove(id)
             workDir.deleteRecursively()
         }
     }
+
+    /** Runs yt-dlp for one job in a fresh [workDir]. Throws if yt-dlp fails. */
+    private fun download(job: DownloadJob, workDir: File, processId: String) {
+        workDir.deleteRecursively()
+        workDir.mkdirs()
+        val progress = ProgressParser(job.options.kind)
+        val request = YtDlp.downloadRequest(job.entry, job.options, workDir)
+        YoutubeDL.getInstance().execute(request, processId) { _, _, line ->
+            progress.handle(line)?.let { update -> modify(job.id) { update(it) } }
+        }
+    }
+
+    private fun Exception.isForbidden() = message.orEmpty().contains("HTTP Error 403")
 
     private fun setState(id: Long, state: JobState) =
         modify(id) { it.copy(state = state, detail = if (state is JobState.Cancelled) "" else it.detail) }
