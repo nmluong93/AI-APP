@@ -33,6 +33,7 @@ class PlaybackController extends ChangeNotifier with WidgetsBindingObserver {
   List<yt.Video> related = const [];
   String? error;
   bool switching = false;
+  int _client = 0; // index into YoutubeService.clientOrder
   int _loadToken = 0;
 
   bool get hasMedia => current != null;
@@ -56,7 +57,9 @@ class PlaybackController extends ChangeNotifier with WidgetsBindingObserver {
       ]);
       if (token != _loadToken) return;
       video = results[0] as yt.Video;
-      sources = results[1] as List<PlaybackSource>;
+      final (list, client) = results[1] as (List<PlaybackSource>, int);
+      sources = list;
+      _client = client;
       notifyListeners();
       _handler?.setMedia(video!);
       AppSettings.instance.addToHistory(
@@ -82,24 +85,53 @@ class PlaybackController extends ChangeNotifier with WidgetsBindingObserver {
     switching = true;
     error = null;
     notifyListeners();
-    final candidates = [source, ..._fallbacks(source)];
-    String? lastError;
-    for (final candidate in candidates) {
-      if (token != _loadToken) return;
-      if (candidate != source) {
-        debugPrint('Playback of ${current?.label} failed ($lastError); trying ${candidate.label}');
+    var lastError = await _tryCandidates(source, from, token);
+
+    // Nothing from this YouTube client played: ask the next client for fresh
+    // stream URLs and try again.
+    while (lastError != null && token == _loadToken && videoId != null) {
+      final List<PlaybackSource> next;
+      final int client;
+      try {
+        (next, client) = await _service.sources(videoId!, from: _client + 1);
+      } catch (_) {
+        break; // no more clients; report the last playback error
       }
-      current = candidate;
-      notifyListeners();
-      lastError = await _tryOpen(candidate, from);
-      if (lastError == null) break;
+      if (token != _loadToken) return;
+      debugPrint('Switching to YouTube client #$client');
+      sources = next;
+      _client = client;
+      final height = source.height > 0
+          ? source.height
+          : AppSettings.instance.preferredHeight;
+      lastError = await _tryCandidates(
+          YoutubeService.pick(next, height), from, token);
     }
+
     if (token != _loadToken) return;
     if (lastError != null) {
       error = 'Could not play this video: $lastError';
     }
     switching = false;
     notifyListeners();
+  }
+
+  /// Tries [first], then one or two simpler streams. Returns null once one
+  /// plays, otherwise the last error.
+  Future<String?> _tryCandidates(
+      PlaybackSource first, Duration? from, int token) async {
+    String? lastError;
+    for (final candidate in [first, ..._fallbacks(first)]) {
+      if (token != _loadToken) return null;
+      if (lastError != null) {
+        debugPrint('${current?.label} failed ($lastError); trying ${candidate.label}');
+      }
+      current = candidate;
+      notifyListeners();
+      lastError = await _tryOpen(candidate, from);
+      if (lastError == null) return null;
+    }
+    return lastError;
   }
 
   /// Simpler streams to try when [failed] doesn't play, most likely first.
@@ -109,7 +141,7 @@ class PlaybackController extends ChangeNotifier with WidgetsBindingObserver {
     final split = sources.where((s) => s.audioUrl != null && s.height <= 720);
     return {...muxed, ...hls, ...split}
         .where((s) => s != failed)
-        .take(3)
+        .take(2)
         .toList();
   }
 

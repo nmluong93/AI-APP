@@ -89,21 +89,28 @@ class YoutubeService {
     };
   }
 
-  Future<StreamManifest> _manifest(String id) async {
-    // The library default client works most of the time; if YouTube changes
-    // something, fall back to other clients before giving up.
-    final attempts = <List<YoutubeApiClient>?>[
-      null,
-      [YoutubeApiClient.androidVr],
-      [YoutubeApiClient.tv, YoutubeApiClient.safari],
-    ];
+  /// YouTube clients to ask for streams, in order of preference. Stream URLs
+  /// from the plain ANDROID client (the library default) now fail to open
+  /// without a "PO token", while ANDROID_VR URLs play without one. If a
+  /// client's streams don't play, the player moves on to the next one.
+  static final clientOrder = <List<YoutubeApiClient>?>[
+    [YoutubeApiClient.androidVr],
+    [YoutubeApiClient.tv],
+    [YoutubeApiClient.ios],
+    null, // library default (androidSdkless)
+    [YoutubeApiClient.safari],
+  ];
+
+  /// Fetches a manifest from the first client at or after [from] that
+  /// returns any streams.
+  Future<(StreamManifest, int)> _manifest(String id, int from) async {
     Object? lastError;
-    for (final clients in attempts) {
+    for (var i = from; i < clientOrder.length; i++) {
       try {
         final m = await _yt.videos.streams
-            .getManifest(id, ytClients: clients)
+            .getManifest(id, ytClients: clientOrder[i])
             .timeout(const Duration(seconds: 20));
-        if (m.streams.isNotEmpty) return m;
+        if (m.streams.isNotEmpty) return (m, i);
       } catch (e) {
         lastError = e;
       }
@@ -111,9 +118,11 @@ class YoutubeService {
     throw Exception('Could not load streams for this video. $lastError');
   }
 
-  /// Builds the list of qualities to offer, best first.
-  Future<List<PlaybackSource>> sources(String id) async {
-    final manifest = await _manifest(id);
+  /// Builds the list of qualities to offer, best first, using the first
+  /// working client at or after index [from] of [clientOrder]. Also returns
+  /// the index of the client used.
+  Future<(List<PlaybackSource>, int)> sources(String id, {int from = 0}) async {
+    final (manifest, client) = await _manifest(id, from);
     final result = <PlaybackSource>[];
 
     final audios = manifest.audioOnly.toList()
@@ -174,7 +183,7 @@ class YoutubeService {
     }
 
     if (result.isEmpty) throw Exception('No playable streams found.');
-    return result;
+    return (result, client);
   }
 
   static bool _better(VideoOnlyStreamInfo a, VideoOnlyStreamInfo b) {
