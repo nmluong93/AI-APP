@@ -103,7 +103,7 @@ what shows ads. This app skips it entirely:
    with YouTube's own player JavaScript. Without that, the web client returns
    no usable URLs and the others are throttled. `lib/js_solver.dart` runs
    yt-dlp's solver scripts (shipped with `youtube_explode_dart`) inside an
-   invisible WebView (`flutter_inappwebview`), which gives the app a full
+   invisible WebView (`webview_flutter`), which gives the app a full
    JavaScript engine on both Android and macOS.
 5. **Choosing a YouTube client.** YouTube hands out stream URLs per "client"
    (Android app, VR app, TV, iOS, web). Some clients' URLs need extra tokens
@@ -165,7 +165,7 @@ The main packages used:
 | `media_kit`, `media_kit_video`, `media_kit_libs_video` | Native video playback (libmpv) and the `Video` widget with built-in controls |
 | `audio_service` | Background playback service and OS media controls |
 | `shared_preferences` | Small key-value storage for settings and history |
-| `flutter_inappwebview` | Hidden WebView used as a JavaScript engine for YouTube's challenges |
+| `webview_flutter` | Hidden WebView used as a JavaScript engine for YouTube's challenges |
 
 ---
 
