@@ -74,17 +74,65 @@ class PlaybackController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   /// Opens [source], keeping the current position when switching quality.
+  /// If it doesn't start playing, falls back to simpler streams (360p muxed,
+  /// then HLS) before giving up with an error message.
   Future<void> play(PlaybackSource source, {Duration? from}) async {
+    final token = _loadToken;
     current = source;
     switching = true;
+    error = null;
     notifyListeners();
+    final candidates = [source, ..._fallbacks(source)];
+    String? lastError;
+    for (final candidate in candidates) {
+      if (token != _loadToken) return;
+      if (candidate != source) {
+        debugPrint('Playback of ${current?.label} failed ($lastError); trying ${candidate.label}');
+      }
+      current = candidate;
+      notifyListeners();
+      lastError = await _tryOpen(candidate, from);
+      if (lastError == null) break;
+    }
+    if (token != _loadToken) return;
+    if (lastError != null) {
+      error = 'Could not play this video: $lastError';
+    }
+    switching = false;
+    notifyListeners();
+  }
+
+  /// Simpler streams to try when [failed] doesn't play, most likely first.
+  List<PlaybackSource> _fallbacks(PlaybackSource failed) {
+    final muxed = sources.where((s) => s.audioUrl == null && s.height > 0);
+    final hls = sources.where((s) => s.height == 0);
+    final split = sources.where((s) => s.audioUrl != null && s.height <= 720);
+    return {...muxed, ...hls, ...split}
+        .where((s) => s != failed)
+        .take(3)
+        .toList();
+  }
+
+  /// Opens one source and waits until it is actually playing. Returns null on
+  /// success, or a short reason on failure.
+  Future<String?> _tryOpen(PlaybackSource source, Duration? from) async {
+    String? playerError;
+    final sub = player.stream.error.listen((e) => playerError = e);
     try {
-      await player.open(Media(source.videoUrl), play: false);
-      if (source.audioUrl != null || (from != null && from > Duration.zero)) {
-        // Wait until the file is loaded before adding audio or seeking.
-        await player.stream.duration
-            .firstWhere((d) => d > Duration.zero)
-            .timeout(const Duration(seconds: 15), onTimeout: () => Duration.zero);
+      final headers = source.headers;
+      final native = player.platform;
+      if (native is NativePlayer) {
+        await native.setProperty('user-agent', headers['User-Agent']!);
+      }
+      await player.open(Media(source.videoUrl, httpHeaders: headers), play: false);
+
+      // Wait until the file is loaded before adding audio or seeking.
+      final loaded = await _waitFor(
+        () => player.state.duration > Duration.zero || playerError != null,
+        const Duration(seconds: 20),
+      );
+      if (!loaded || player.state.duration == Duration.zero) {
+        return playerError ?? 'timed out loading the stream';
       }
       if (source.audioUrl != null) {
         await player.setAudioTrack(AudioTrack.uri(source.audioUrl!));
@@ -93,13 +141,33 @@ class PlaybackController extends ChangeNotifier with WidgetsBindingObserver {
       if (_inBackground && !source.audioOnly) {
         await player.setVideoTrack(VideoTrack.no());
       }
+      final startAt = player.state.position;
       await player.play();
+
+      // Make sure it really plays rather than buffering forever. If the user
+      // pauses meanwhile, count that as success.
+      final started = await _waitFor(
+        () =>
+            !player.state.playing ||
+            player.state.position > startAt + const Duration(milliseconds: 500),
+        const Duration(seconds: 20),
+      );
+      if (!started) return playerError ?? 'stream stalled while buffering';
+      return null;
     } catch (e) {
-      error = 'Playback failed: $e';
+      return '$e';
     } finally {
-      switching = false;
-      notifyListeners();
+      await sub.cancel();
     }
+  }
+
+  static Future<bool> _waitFor(bool Function() test, Duration timeout) async {
+    final deadline = DateTime.now().add(timeout);
+    while (DateTime.now().isBefore(deadline)) {
+      if (test()) return true;
+      await Future.delayed(const Duration(milliseconds: 250));
+    }
+    return test();
   }
 
   Future<void> changeQuality(PlaybackSource source) =>

@@ -16,6 +16,9 @@ class PlaybackSource {
     this.audioUrl,
     this.audioOnly = false,
   });
+
+  /// HTTP headers the player must send when fetching these URLs.
+  Map<String, String> get headers => YoutubeService.headersFor(videoUrl);
 }
 
 /// Thin wrapper over youtube_explode_dart. Talks to YouTube directly, so no
@@ -46,6 +49,46 @@ class YoutubeService {
     }
   }
 
+  // YouTube rejects (HTTP 403) or stalls stream requests whose User-Agent
+  // doesn't match the client that asked for them. The client is named in the
+  // URL's `c` parameter, so look up the matching User-Agent from there.
+  static final Map<String, String> _userAgents = () {
+    final map = <String, String>{
+      // androidVr doesn't declare one in youtube_explode; this is yt-dlp's.
+      'ANDROID_VR':
+          'com.google.android.apps.youtube.vr.oculus/1.56.21 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip',
+    };
+    for (final client in [
+      YoutubeApiClient.ios,
+      YoutubeApiClient.androidSdkless,
+      YoutubeApiClient.androidMusic,
+      YoutubeApiClient.safari,
+      YoutubeApiClient.tv,
+      YoutubeApiClient.mweb,
+    ]) {
+      final c = client.payload['context']?['client'] as Map<String, dynamic>?;
+      final name = c?['clientName'] as String?;
+      final ua = c?['userAgent'] as String?;
+      if (name != null && ua != null) map.putIfAbsent(name, () => ua);
+    }
+    return map;
+  }();
+
+  static const _browserUserAgent =
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.5 Safari/605.1.15';
+
+  static Map<String, String> headersFor(String url) {
+    final client = Uri.tryParse(url)?.queryParameters['c'] ?? '';
+    final ua = _userAgents[client] ?? _browserUserAgent;
+    return {
+      'User-Agent': ua,
+      if (!client.startsWith('ANDROID') && client != 'IOS') ...{
+        'Origin': 'https://www.youtube.com',
+        'Referer': 'https://www.youtube.com/',
+      },
+    };
+  }
+
   Future<StreamManifest> _manifest(String id) async {
     // The library default client works most of the time; if YouTube changes
     // something, fall back to other clients before giving up.
@@ -57,7 +100,9 @@ class YoutubeService {
     Object? lastError;
     for (final clients in attempts) {
       try {
-        final m = await _yt.videos.streams.getManifest(id, ytClients: clients);
+        final m = await _yt.videos.streams
+            .getManifest(id, ytClients: clients)
+            .timeout(const Duration(seconds: 20));
         if (m.streams.isNotEmpty) return m;
       } catch (e) {
         lastError = e;
