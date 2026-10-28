@@ -516,6 +516,7 @@ Android to install an update over an older build.
 | `AndroidManifest.xml` | `INTERNET` permission | Release builds can't go online without it |
 | `AndroidManifest.xml` | `WAKE_LOCK`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MEDIA_PLAYBACK`, the `AudioService` `<service>` and `MediaButtonReceiver` `<receiver>` | Background playback and media buttons (`audio_service`) |
 | `MainActivity.kt` | `extends AudioServiceActivity` | Required by `audio_service` |
+| `AndroidManifest.xml` | `io.flutter.embedding.android.EnableImpeller` = `false` | With Flutter's Impeller renderer the WebView's video shows black (sound still plays). If a future Flutter removes this opt-out, try `io.flutter.embedding.android.ImpellerBackend` = `opengles` instead |
 | `macos/Runner/*.entitlements` | `com.apple.security.network.client` | The sandboxed Mac app can't make network requests without it |
 
 ---

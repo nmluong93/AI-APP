@@ -316,11 +316,47 @@ ytm-pivot-bar-renderer, .mobile-topbar-header, ytm-app-promo-renderer,
           error: v.error ? v.error.code + ' ' + v.error.message : null,
         };
       }),
+      parents: (() => {
+        const out = [];
+        for (let n = video(); n && n !== document.documentElement; n = n.parentElement) {
+          const cs = getComputedStyle(n);
+          const r = n.getBoundingClientRect();
+          out.push(n.tagName.toLowerCase() + (n.id ? '#' + n.id : '') +
+            (n.className && typeof n.className === 'string' ? '.' + n.className.trim().split(/\\s+/).slice(0, 3).join('.') : '') +
+            ' ' + cs.display + '/' + cs.visibility + '/' + cs.opacity + '/' + cs.position +
+            ' ' + [r.x, r.y, r.width, r.height].map(Math.round).join(','));
+        }
+        return out;
+      })(),
       viewport: innerWidth + 'x' + innerHeight,
       userAgent: navigator.userAgent,
     };
     return JSON.stringify(info, null, 1);
   };
+
+  // Our CSS hides parts of the site by class name, and YouTube moves its
+  // player around between releases. If anything above the video ends up
+  // hidden, the sound plays but the picture doesn't, so force the video's
+  // whole chain of parents back into view. (Inline !important styles win
+  // over stylesheet !important ones.)
+  function keepVisible(el) {
+    for (let n = el; n && n !== document.documentElement; n = n.parentElement) {
+      const cs = getComputedStyle(n);
+      if (cs.display === 'none') n.style.setProperty('display', 'block', 'important');
+      if (cs.visibility !== 'visible') n.style.setProperty('visibility', 'visible', 'important');
+      if (cs.opacity !== '1') n.style.setProperty('opacity', '1', 'important');
+      if (n !== el && cs.overflow !== 'visible') n.style.setProperty('overflow', 'visible', 'important');
+      if (cs.transform !== 'none') n.style.setProperty('transform', 'none', 'important');
+      if (cs.filter !== 'none') n.style.setProperty('filter', 'none', 'important');
+      if (cs.contain !== 'none') n.style.setProperty('contain', 'none', 'important');
+    }
+    el.style.setProperty('position', 'fixed', 'important');
+    el.style.setProperty('inset', '0', 'important');
+    el.style.setProperty('width', '100vw', 'important');
+    el.style.setProperty('height', '100vh', 'important');
+    el.style.setProperty('object-fit', 'contain', 'important');
+    el.style.setProperty('z-index', '2147483647', 'important');
+  }
 
   function skipAds() {
     const p = player();
@@ -349,6 +385,7 @@ ytm-pivot-bar-renderer, .mobile-topbar-header, ytm-app-promo-renderer,
     addStyle();
     const ad = skipAds();
     const el = video();
+    if (el) keepVisible(el);
     const p = player();
     let err = null;
     const errBox = document.querySelector('.ytp-error-content-wrap-reason, .ytp-error .ytp-error-content');
