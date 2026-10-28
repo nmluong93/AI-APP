@@ -11,6 +11,26 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.path
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import coil.compose.AsyncImage
+import com.ytdownloader.InputMode
+import com.ytdownloader.SearchResult
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -120,39 +140,75 @@ fun MainScreen(vm: MainViewModel) {
                 is Engine.State.Ready -> Unit
             }
 
-            item { LinkCard(vm) }
+            item { ModeSwitch(vm) }
 
-            val media = vm.media
-            when {
-                vm.isFetching -> item { InfoCard("Reading link… large playlists can take a moment.", busy = true) }
-                vm.fetchError != null -> item { InfoCard("Couldn't read that link.\n${vm.fetchError}", isError = true) }
-                media != null -> {
-                    item { MediaHeader(vm) }
-                    items(media.entries, key = { it.id }) { entry ->
-                        EntryRow(entry, showIndex = media.isPlaylist, onToggle = { vm.toggle(entry.id) })
+            when (vm.mode) {
+                InputMode.LINK -> {
+                    item { LinkCard(vm) }
+
+                    val media = vm.media
+                    when {
+                        vm.isFetching -> item { InfoCard("Reading link… large playlists can take a moment.", busy = true) }
+                        vm.fetchError != null -> item { InfoCard("Couldn't read that link.\n${vm.fetchError}", isError = true) }
+                        media != null -> {
+                            item { MediaHeader(vm) }
+                            items(media.entries, key = { it.id }) { entry ->
+                                EntryRow(entry, showIndex = media.isPlaylist, onToggle = { vm.toggle(entry.id) })
+                            }
+                        }
+                        else -> item {
+                            InfoCard("Paste a YouTube video or playlist link, or use Share → YT Downloader in the YouTube app.")
+                        }
+                    }
+
+                    item { OptionsCard(vm) }
+
+                    item {
+                        val count = vm.selectedEntries.size
+                        Button(
+                            onClick = { vm.download() },
+                            enabled = count > 0 && engine is Engine.State.Ready,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                when {
+                                    vm.media == null -> "Download"
+                                    count == 1 -> "Download 1 ${if (vm.kind == MediaKind.AUDIO) "MP3" else "video"}"
+                                    else -> "Download $count ${if (vm.kind == MediaKind.AUDIO) "MP3s" else "videos"}"
+                                }
+                            )
+                        }
                     }
                 }
-                else -> item {
-                    InfoCard("Paste a YouTube video or playlist link, or use Share → YT Downloader in the YouTube app.")
-                }
-            }
-
-            item { OptionsCard(vm) }
-
-            item {
-                val count = vm.selectedEntries.size
-                Button(
-                    onClick = vm::download,
-                    enabled = count > 0 && engine is Engine.State.Ready,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(
-                        when {
-                            vm.media == null -> "Download"
-                            count == 1 -> "Download 1 ${if (vm.kind == MediaKind.AUDIO) "MP3" else "video"}"
-                            else -> "Download $count ${if (vm.kind == MediaKind.AUDIO) "MP3s" else "videos"}"
+                InputMode.SEARCH -> {
+                    item { SearchCard(vm) }
+                    val results = vm.searchResults
+                    when {
+                        vm.searchError != null -> item { InfoCard("Search failed.\n${vm.searchError}", isError = true) }
+                        vm.isSearching && results.isEmpty() -> item { InfoCard("Searching YouTube…", busy = true) }
+                        vm.hasSearched && results.isEmpty() -> item { InfoCard("No videos found. Try different words.") }
+                        results.isEmpty() -> item {
+                            InfoCard("Search YouTube, then tap Download on a video. It uses the options below.")
                         }
-                    )
+                    }
+                    items(results, key = { "search-${it.id}" }) { result ->
+                        SearchResultRow(
+                            result = result,
+                            isQueued = result.id in vm.queuedResultIds,
+                            enabled = engine is Engine.State.Ready,
+                            onDownload = { vm.download(result) },
+                        )
+                    }
+                    if (results.isNotEmpty() && (vm.canLoadMore || vm.isSearching)) {
+                        item {
+                            OutlinedButton(
+                                onClick = { vm.search(more = true) },
+                                enabled = !vm.isSearching,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text(if (vm.isSearching) "Loading…" else "Show more results") }
+                        }
+                    }
+                    item { OptionsCard(vm) }
                 }
             }
 
@@ -209,6 +265,143 @@ private fun TopBar(vm: MainViewModel, engine: Engine.State) {
             }
         },
     )
+}
+
+@Composable
+private fun ModeSwitch(vm: MainViewModel) {
+    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+        InputMode.entries.forEachIndexed { index, mode ->
+            SegmentedButton(
+                selected = vm.mode == mode,
+                onClick = { vm.mode = mode },
+                shape = SegmentedButtonDefaults.itemShape(index = index, count = InputMode.entries.size),
+            ) { Text(mode.title) }
+        }
+    }
+}
+
+@Composable
+private fun SearchCard(vm: MainViewModel) {
+    val keyboard = LocalSoftwareKeyboardController.current
+    val submit = {
+        keyboard?.hide()
+        vm.search()
+    }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedTextField(
+            value = vm.query,
+            onValueChange = { vm.query = it },
+            label = { Text("Search YouTube") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { submit() }),
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+            trailingIcon = {
+                if (vm.query.isNotEmpty()) {
+                    IconButton(onClick = { vm.query = "" }) { Icon(Icons.Default.Close, contentDescription = "Clear") }
+                }
+            },
+            modifier = Modifier.weight(1f),
+        )
+        Button(
+            onClick = { submit() },
+            enabled = !vm.isSearching && vm.query.isNotBlank(),
+        ) {
+            if (vm.isSearching) {
+                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+            } else {
+                Text("Search")
+            }
+        }
+    }
+}
+
+@Composable
+private fun SearchResultRow(result: SearchResult, isQueued: Boolean, enabled: Boolean, onDownload: () -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+        Box(contentAlignment = Alignment.BottomEnd) {
+            AsyncImage(
+                model = result.thumbnailUrl,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .width(128.dp)
+                    .aspectRatio(16f / 9f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+            )
+            val duration = formatDuration(result.duration)
+            if (duration.isNotEmpty()) {
+                Text(
+                    duration,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White,
+                    modifier = Modifier
+                        .padding(4.dp)
+                        .background(Color.Black.copy(alpha = 0.75f), RoundedCornerShape(4.dp))
+                        .padding(horizontal = 4.dp, vertical = 1.dp),
+                )
+            }
+        }
+        Column(
+            Modifier
+                .weight(1f)
+                .padding(horizontal = 12.dp),
+        ) {
+            Text(
+                result.title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            result.channel?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (isQueued) {
+            FilledTonalIconButton(onClick = onDownload, enabled = enabled) {
+                Icon(Icons.Default.Check, contentDescription = "Queued, tap to download again")
+            }
+        } else {
+            FilledIconButton(onClick = onDownload, enabled = enabled) {
+                Icon(DownloadIcon, contentDescription = "Download")
+            }
+        }
+    }
+}
+
+/** A download arrow, drawn here because material-icons-core has none. */
+private val DownloadIcon: ImageVector by lazy {
+    ImageVector.Builder(
+        name = "Download",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f,
+    ).apply {
+        path(fill = SolidColor(Color.Black)) {
+            moveTo(5f, 20f)
+            horizontalLineToRelative(14f)
+            verticalLineToRelative(-2f)
+            horizontalLineTo(5f)
+            close()
+            moveTo(19f, 9f)
+            horizontalLineToRelative(-4f)
+            verticalLineTo(3f)
+            horizontalLineTo(9f)
+            verticalLineToRelative(6f)
+            horizontalLineTo(5f)
+            lineToRelative(7f, 7f)
+            close()
+        }
+    }.build()
 }
 
 @Composable
@@ -340,7 +533,7 @@ private fun OptionsCard(vm: MainViewModel) {
                 )
             }
 
-            if (vm.media?.isPlaylist == true) {
+            if (vm.mode == InputMode.LINK && vm.media?.isPlaylist == true) {
                 SwitchRow("Put playlist in its own folder", null, vm.playlistSubfolder) { vm.playlistSubfolder = it }
                 SwitchRow("Number files by playlist order", null, vm.numberPlaylistFiles) { vm.numberPlaylistFiles = it }
             }

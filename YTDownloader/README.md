@@ -4,6 +4,8 @@ A small native macOS app (SwiftUI) for downloading a YouTube video, or any video
 
 Paste a link, press **Fetch**, tick the videos you want (for playlists), pick Video or Audio and a quality, choose a folder, and press **Download**. Downloads run one at a time with live progress, and each can be cancelled, retried, or shown in Finder.
 
+Or switch to **Search YouTube** at the top, type a search, and click the download arrow on any result to queue it with the current options. Search runs through yt-dlp, so no API key is needed.
+
 > **Please use responsibly.** Downloading from YouTube can break YouTube's Terms of Service. Only download content you own, content that is licensed for download (e.g. Creative Commons), or content you otherwise have permission to save.
 
 ## How it works

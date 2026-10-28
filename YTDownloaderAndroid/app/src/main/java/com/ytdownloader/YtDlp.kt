@@ -11,6 +11,8 @@ import java.io.File
 class YtDlpException(message: String) : Exception(message)
 
 object YtDlp {
+    const val SEARCH_PAGE_SIZE = 20
+
     private val linkPattern = Regex("""https?://\S+""")
 
     fun isValidLink(text: String): Boolean {
@@ -44,6 +46,51 @@ object YtDlp {
             throw YtDlpException("Unexpected response from yt-dlp.")
         }
         parse(json, trimmed)
+    }
+
+    /** Searches YouTube with yt-dlp's ytsearch, so no API key is needed. */
+    suspend fun search(query: String, count: Int = SEARCH_PAGE_SIZE): List<SearchResult> = withContext(Dispatchers.IO) {
+        val trimmed = query.trim()
+        if (trimmed.isEmpty()) throw YtDlpException("Type something to search for.")
+        if (!Engine.awaitReady()) throw YtDlpException("yt-dlp could not be set up on this phone.")
+
+        val request = YoutubeDLRequest("ytsearch$count:$trimmed")
+            .addOption("-J")
+            .addOption("--flat-playlist")
+            .addOption("--no-warnings")
+            .addOption("--color", "never")
+        val response = try {
+            YoutubeDL.getInstance().execute(request)
+        } catch (e: Exception) {
+            throw YtDlpException(cleanError(e.message, "yt-dlp could not search YouTube."))
+        }
+        val json = try {
+            JSONObject(response.out)
+        } catch (e: Exception) {
+            throw YtDlpException("Unexpected response from yt-dlp.")
+        }
+        parseSearch(json)
+    }
+
+    fun parseSearch(json: JSONObject): List<SearchResult> {
+        val raw = json.optJSONArray("entries") ?: return emptyList()
+        val results = mutableListOf<SearchResult>()
+        val seen = mutableSetOf<String>()
+        for (offset in 0 until raw.length()) {
+            val e = raw.optJSONObject(offset) ?: continue
+            val id = e.str("id") ?: continue
+            // Search can return channels or playlists too; only videos have an 11-character id.
+            if (id.length != 11 || !seen.add(id)) continue
+            results += SearchResult(
+                id = id,
+                title = e.str("title") ?: id,
+                channel = e.str("channel") ?: e.str("uploader"),
+                duration = e.optDouble("duration").takeUnless { it.isNaN() },
+                url = "https://www.youtube.com/watch?v=$id",
+                thumbnailUrl = "https://i.ytimg.com/vi/$id/mqdefault.jpg",
+            )
+        }
+        return results
     }
 
     fun parse(json: JSONObject, originalLink: String): FetchedMedia {
