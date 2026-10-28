@@ -101,6 +101,15 @@ class YoutubeService {
     [YoutubeApiClient.safari],
   ];
 
+  /// Why clients were skipped while fetching manifests, for error messages.
+  final manifestErrors = <String>[];
+
+  static String clientName(List<YoutubeApiClient>? clients) => clients == null
+      ? 'default'
+      : clients
+          .map((c) => c.payload['context']?['client']?['clientName'] ?? '?')
+          .join('+');
+
   /// Fetches a manifest from the first client at or after [from] that
   /// returns any streams.
   Future<(StreamManifest, int)> _manifest(String id, int from) async {
@@ -111,8 +120,11 @@ class YoutubeService {
             .getManifest(id, ytClients: clientOrder[i])
             .timeout(const Duration(seconds: 20));
         if (m.streams.isNotEmpty) return (m, i);
+        manifestErrors.add('${clientName(clientOrder[i])}: no streams');
       } catch (e) {
         lastError = e;
+        final reason = '$e'.split('\n').first;
+        manifestErrors.add('${clientName(clientOrder[i])}: $reason');
       }
     }
     throw Exception('Could not load streams for this video. $lastError');

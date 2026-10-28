@@ -90,11 +90,24 @@ what shows ads. This app skips it entirely:
    `lib/youtube_service.dart` turns the manifest into a simple list of
    `PlaybackSource`s (one per resolution), each with a video URL and an
    optional separate audio URL.
-3. **Playing.** [`media_kit`](https://pub.dev/packages/media_kit) wraps
+3. **Proxying.** YouTube stalls or refuses stream downloads that are
+   requested in one huge piece or with unexpected headers. So the player never
+   opens YouTube's URLs directly. `lib/stream_proxy.dart` runs a tiny HTTP
+   server on `127.0.0.1`, and the player reads from it. For each request it
+   fetches the data from YouTube in chunks of at most 10 MB, using the same
+   headers and range style that `youtube_explode_dart` uses for its own
+   downloads. It also records YouTube's HTTP errors (e.g. 403) so the app can
+   show them.
+4. **Choosing a YouTube client.** YouTube hands out stream URLs per "client"
+   (Android app, VR app, TV, iOS, web). Some clients' URLs need extra tokens
+   only the official apps can make. `YoutubeService.clientOrder` lists the
+   clients to try. If no stream from one client plays, `PlaybackController`
+   fetches fresh URLs from the next client and tries again.
+5. **Playing.** [`media_kit`](https://pub.dev/packages/media_kit) wraps
    **libmpv**, a powerful native media player. We open the video URL and,
    if there's a separate audio stream, attach it as an *external audio
    track*. mpv keeps the two in sync.
-4. **Background and system controls.**
+6. **Background and system controls.**
    [`audio_service`](https://pub.dev/packages/audio_service) runs an Android
    *foreground service* (so Android doesn't kill the app when it's hidden)
    and publishes the "now playing" info and buttons to the OS.
@@ -161,6 +174,7 @@ adfree_tube/
 │   ├── playback.dart             PlaybackController (the one app-wide player),
 │   │                             background handling, sleep timer, OS media controls
 │   ├── youtube_service.dart      Everything that talks to YouTube; builds PlaybackSources
+│   ├── stream_proxy.dart         Local HTTP proxy the player reads streams through (see below)
 │   ├── settings.dart             Saved preferences (default quality) and watch history
 │   └── widgets.dart              Shared VideoTile widget and number/duration formatting
 ├── android/                      Android project (Gradle)
@@ -172,7 +186,7 @@ adfree_tube/
 │       ├── DebugProfile.entitlements   Sandbox permissions (network access) for debug builds
 │       ├── Release.entitlements        Same, for release builds
 │       └── Configs/AppInfo.xcconfig    App name and bundle id
-├── test/                         (empty for now; put tests here)
+├── test/                         Unit tests (`flutter test`), e.g. for the stream proxy
 ├── pubspec.yaml                  Dependencies and app version
 ├── pubspec.lock                  Exact resolved dependency versions (commit it)
 └── analysis_options.yaml         Lint rules used by `flutter analyze`
@@ -289,7 +303,7 @@ Before committing, run the same checks CI runs:
 ```bash
 flutter analyze            # static analysis / lints, must say "No issues found!"
 dart format lib            # formats code in the standard style
-flutter test               # runs tests in test/ (none yet)
+flutter test               # runs the unit tests in test/
 ```
 
 ---
@@ -418,7 +432,7 @@ pushes and pull requests, and can be started by hand from the Actions tab
 
 | Job | Runner | Steps |
 | --- | --- | --- |
-| `android` | Ubuntu | `flutter pub get` → `flutter analyze` → load signing key (if set) → `flutter build apk --target-platform android-arm64` → upload `AdFreeTube.apk` |
+| `android` | Ubuntu | `flutter pub get` → `flutter analyze` → `flutter test` → load signing key (if set) → `flutter build apk --target-platform android-arm64` → upload `AdFreeTube.apk` |
 | `macos` | macOS | `flutter pub get` → `flutter build macos` → zip the `.app` → upload |
 
 Every `run:` step runs inside `adfree_tube/` (set by `defaults.run.working-directory`).
@@ -452,9 +466,14 @@ package's [changelog](https://pub.dev/packages/youtube_explode_dart/changelog)
 and [GitHub issues](https://github.com/Hexer10/youtube_explode_dart/issues)
 for known problems.
 
-`YoutubeService._manifest()` already retries with a few different YouTube
-"clients" (`androidVr`, `tv`, `safari`) if the default one fails. If one
-client starts working better than the others, reorder that list.
+`YoutubeService.clientOrder` lists the YouTube "clients" the app asks for
+streams, in order (currently `androidVr`, `tv`, `ios`, the library default,
+`safari`). When a video fails, the error box under the player lists every
+client and stream that was tried and why it failed (tap **Copy** to share
+it). If one client starts working better than the others, move it to the
+front of that list. yt-dlp's
+[PO token guide](https://github.com/yt-dlp/yt-dlp/wiki/PO-Token-Guide) is a
+good, current reference on which clients need what.
 
 ### Updating other packages and Flutter
 

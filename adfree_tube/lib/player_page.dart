@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import 'playback.dart';
@@ -68,13 +69,9 @@ class _PlayerPageState extends State<PlayerPage> {
       child: Container(
         color: Colors.black,
         child: _c.error != null && _c.current == null
-            ? Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Text(_c.error!,
-                      style: const TextStyle(color: Colors.white),
-                      textAlign: TextAlign.center),
-                ),
+            ? SingleChildScrollView(
+                padding: const EdgeInsets.all(12),
+                child: ErrorBox(text: _c.error!),
               )
             : Stack(
                 fit: StackFit.expand,
@@ -133,9 +130,8 @@ class _PlayerPageState extends State<PlayerPage> {
               ),
               if (_c.error != null && _c.current != null)
                 Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(_c.error!,
-                      style: TextStyle(color: theme.colorScheme.error)),
+                  padding: const EdgeInsets.only(top: 12),
+                  child: ErrorBox(text: _c.error!),
                 ),
               const SizedBox(height: 12),
               _Description(text: video.description),
@@ -217,6 +213,56 @@ class _DescriptionState extends State<_Description> {
           maxLines: _expanded ? null : 3,
           onTap: () => setState(() => _expanded = !_expanded),
         ),
+      ),
+    );
+  }
+}
+
+/// Error message that can be selected, with a button to copy all of it.
+class ErrorBox extends StatelessWidget {
+  final String text;
+
+  const ErrorBox({super.key, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(12, 4, 4, 12),
+      decoration: BoxDecoration(
+        color: scheme.errorContainer,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.error_outline, color: scheme.onErrorContainer),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text('Playback error',
+                    style: TextStyle(
+                        color: scheme.onErrorContainer,
+                        fontWeight: FontWeight.bold)),
+              ),
+              TextButton.icon(
+                onPressed: () async {
+                  await Clipboard.setData(ClipboardData(text: text));
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Error copied')),
+                    );
+                  }
+                },
+                icon: const Icon(Icons.copy, size: 18),
+                label: const Text('Copy'),
+              ),
+            ],
+          ),
+          SelectableText(text, style: TextStyle(color: scheme.onErrorContainer)),
+        ],
       ),
     );
   }

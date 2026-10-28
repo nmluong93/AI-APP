@@ -8,6 +8,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart' as yt;
 
 import 'settings.dart';
+import 'stream_proxy.dart';
 import 'youtube_service.dart';
 
 /// Owns the one app-wide player, so playback keeps going when you leave the
@@ -34,6 +35,7 @@ class PlaybackController extends ChangeNotifier with WidgetsBindingObserver {
   String? error;
   bool switching = false;
   int _client = 0; // index into YoutubeService.clientOrder
+  final _failures = <String>[]; // playback attempts that failed, for the error
   int _loadToken = 0;
 
   bool get hasMedia => current != null;
@@ -51,6 +53,7 @@ class PlaybackController extends ChangeNotifier with WidgetsBindingObserver {
     await player.stop();
     notifyListeners();
     try {
+      _service.manifestErrors.clear();
       final results = await Future.wait([
         _service.getVideo(id),
         _service.sources(id),
@@ -84,6 +87,7 @@ class PlaybackController extends ChangeNotifier with WidgetsBindingObserver {
     current = source;
     switching = true;
     error = null;
+    _failures.clear();
     notifyListeners();
     var lastError = await _tryCandidates(source, from, token);
 
@@ -110,7 +114,11 @@ class PlaybackController extends ChangeNotifier with WidgetsBindingObserver {
 
     if (token != _loadToken) return;
     if (lastError != null) {
-      error = 'Could not play this video: $lastError';
+      error = [
+        'Could not play this video. What was tried:',
+        ..._service.manifestErrors.map((e) => '• streams from $e'),
+        ..._failures.map((e) => '• $e'),
+      ].join('\n');
     }
     switching = false;
     notifyListeners();
@@ -130,6 +138,7 @@ class PlaybackController extends ChangeNotifier with WidgetsBindingObserver {
       notifyListeners();
       lastError = await _tryOpen(candidate, from);
       if (lastError == null) return null;
+      _failures.add(lastError);
     }
     return lastError;
   }
@@ -150,13 +159,25 @@ class PlaybackController extends ChangeNotifier with WidgetsBindingObserver {
   Future<String?> _tryOpen(PlaybackSource source, Duration? from) async {
     String? playerError;
     final sub = player.stream.error.listen((e) => playerError = e);
+    final proxy = StreamProxy.instance;
+    proxy.lastError = null;
     try {
+      // Plain stream files go through the local proxy; HLS playlists are
+      // opened directly with the right headers.
       final headers = source.headers;
       final native = player.platform;
       if (native is NativePlayer) {
         await native.setProperty('user-agent', headers['User-Agent']!);
       }
-      await player.open(Media(source.videoUrl, httpHeaders: headers), play: false);
+      final videoUrl = StreamProxy.canProxy(source.videoUrl)
+          ? await proxy.register(source.videoUrl)
+          : source.videoUrl;
+      final audioUrl = source.audioUrl == null
+          ? null
+          : StreamProxy.canProxy(source.audioUrl!)
+              ? await proxy.register(source.audioUrl!)
+              : source.audioUrl;
+      await player.open(Media(videoUrl, httpHeaders: headers), play: false);
 
       // Wait until the file is loaded before adding audio or seeking.
       final loaded = await _waitFor(
@@ -164,10 +185,11 @@ class PlaybackController extends ChangeNotifier with WidgetsBindingObserver {
         const Duration(seconds: 20),
       );
       if (!loaded || player.state.duration == Duration.zero) {
-        return playerError ?? 'timed out loading the stream';
+        return _describeFailure(source,
+            proxy.lastError ?? playerError ?? 'timed out loading the stream');
       }
-      if (source.audioUrl != null) {
-        await player.setAudioTrack(AudioTrack.uri(source.audioUrl!));
+      if (audioUrl != null) {
+        await player.setAudioTrack(AudioTrack.uri(audioUrl));
       }
       if (from != null && from > Duration.zero) await player.seek(from);
       if (_inBackground && !source.audioOnly) {
@@ -184,13 +206,24 @@ class PlaybackController extends ChangeNotifier with WidgetsBindingObserver {
             player.state.position > startAt + const Duration(milliseconds: 500),
         const Duration(seconds: 20),
       );
-      if (!started) return playerError ?? 'stream stalled while buffering';
+      if (!started) {
+        return _describeFailure(source,
+            proxy.lastError ?? playerError ?? 'stream stalled while buffering');
+      }
       return null;
     } catch (e) {
-      return '$e';
+      return _describeFailure(source, '$e');
     } finally {
       await sub.cancel();
     }
+  }
+
+  /// Short, readable failure line, e.g. "720p [ANDROID_VR]: HTTP 403 ...".
+  static String _describeFailure(PlaybackSource source, String reason) {
+    final client = Uri.tryParse(source.videoUrl)?.queryParameters['c'] ?? 'HLS';
+    // mpv errors repeat the whole (very long) URL; keep just the gist.
+    final short = reason.replaceAll(RegExp(r'https?://\S+'), '<url>');
+    return '${source.label} [$client]: $short';
   }
 
   static Future<bool> _waitFor(bool Function() test, Duration timeout) async {
