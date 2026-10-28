@@ -311,36 +311,61 @@ Privacy & Security*). You only need to do this once.
 ### Android
 
 ```bash
-flutter build apk --release --split-per-abi
+flutter build apk --release --target-platform android-arm64
 ```
 
-This creates one APK per CPU type in `build/app/outputs/flutter-apk/`:
-
-| File | Use it for |
-| --- | --- |
-| `app-arm64-v8a-release.apk` | **Almost every phone from the last ~8 years** |
-| `app-armeabi-v7a-release.apk` | Very old 32-bit phones |
-| `app-x86_64-release.apk` | Emulators / Chromebooks |
+This creates `build/app/outputs/flutter-apk/app-release.apk` for 64-bit ARM
+phones (arm64), which covers practically every Android phone from the last
+~8 years. Many recent phones, such as the Galaxy S23, **can't run 32-bit
+apps at all**, which is why the build skips the 32-bit variant. To build for
+an emulator, use `--target-platform android-x64`. To build one large APK
+that runs everywhere, leave out `--target-platform`.
 
 To install:
 
 - **USB:** `flutter install`, or
-  `adb install build/app/outputs/flutter-apk/app-arm64-v8a-release.apk`
+  `adb install build/app/outputs/flutter-apk/app-release.apk`
 - **Without a cable:** copy the APK to the phone (Google Drive, email,
-  Telegram…), tap it, and allow *Install unknown apps* when asked.
+  Quick Share…), tap it, and allow *Install unknown apps* when asked.
 
-The release APK is signed with Flutter's debug key. That's fine for personal
-use, but it means you can't publish it to the Play Store as is, and an APK
-built on a different machine can't be installed over it. Uninstall the old
-one first if you see *"App not installed"*.
+#### Signing (why updates sometimes say "App not installed")
+
+Android only installs an update over an existing app when both are signed
+with the **same key**.
+
+- **Local builds** are signed with your machine's Flutter debug key. That's
+  fine for personal use, but a build from another machine can't update it.
+- **CI builds** use a fixed release key when these four repository secrets
+  are set (*GitHub → Settings → Secrets and variables → Actions*):
+
+  | Secret | Value |
+  | --- | --- |
+  | `ANDROID_KEYSTORE_BASE64` | The `.jks` keystore file, base64-encoded (`base64 -i release.jks`) |
+  | `ANDROID_KEYSTORE_PASSWORD` | Keystore password |
+  | `ANDROID_KEY_ALIAS` | Key alias |
+  | `ANDROID_KEY_PASSWORD` | Key password |
+
+  Create a keystore once with:
+  ```bash
+  keytool -genkeypair -v -keystore release.jks -alias adfreetube \
+    -keyalg RSA -keysize 2048 -validity 10000
+  ```
+  Keep the file and passwords safe and **never commit them**. If the secrets
+  are missing, CI falls back to a throwaway debug key that's different on
+  every run (the run shows a warning), so each new APK has to be installed
+  after uninstalling the previous one.
+
+The signing setup is in `android/app/build.gradle.kts`, which reads the
+`ANDROID_KEYSTORE_PATH`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and
+`ANDROID_KEY_PASSWORD` environment variables.
 
 ### Don't want to install anything? Let GitHub build it
 
 Every push that changes `adfree_tube/` triggers the
 [CI workflow](#continuous-integration-github-actions), which builds both
 apps. Open the repo's **Actions** tab, click the latest **AdFree Tube build**
-run, and download **adfree-tube-android** or **adfree-tube-macos** from the
-*Artifacts* section at the bottom.
+run, and download **adfree-tube-android** (contains `AdFreeTube.apk`) or
+**adfree-tube-macos** from the *Artifacts* section at the bottom.
 
 ---
 
@@ -393,7 +418,7 @@ pushes and pull requests, and can be started by hand from the Actions tab
 
 | Job | Runner | Steps |
 | --- | --- | --- |
-| `android` | Ubuntu | `flutter pub get` → `flutter analyze` → `flutter build apk --split-per-abi` → upload APKs |
+| `android` | Ubuntu | `flutter pub get` → `flutter analyze` → load signing key (if set) → `flutter build apk --target-platform android-arm64` → upload `AdFreeTube.apk` |
 | `macos` | macOS | `flutter pub get` → `flutter build macos` → zip the `.app` → upload |
 
 Every `run:` step runs inside `adfree_tube/` (set by `defaults.run.working-directory`).
@@ -554,7 +579,7 @@ with `play()`, `pause()`, `seek()`, `setRate()`, `setVolume()` and so on, and
 | No notification controls on Android | Make sure notifications are allowed for the app in Android settings |
 | macOS: *"AdFree Tube can't be opened"* | Right-click → **Open**, or allow it in *System Settings → Privacy & Security* |
 | macOS: thumbnails and videos don't load | The `network.client` entitlement is missing from `macos/Runner/*.entitlements` |
-| Android: *"App not installed"* | Uninstall the existing copy first (it was signed with a different key) |
+| Android: *"App not installed"* | Either the APK is for the wrong processor type (a 32-bit `armeabi-v7a` APK on a 64-bit-only phone such as the S23), or an existing copy was signed with a different key. Uninstall the old copy first; see [Signing](#signing-why-updates-sometimes-say-app-not-installed) |
 | `flutter build macos` fails with CocoaPods errors | `cd macos && pod repo update && cd .. && flutter clean && flutter pub get` |
 | Odd build errors after updating packages | `flutter clean && flutter pub get`, then build again |
 | `flutter doctor` complains about Android licences | `flutter doctor --android-licenses` and accept all |

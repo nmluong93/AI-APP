@@ -29,11 +29,28 @@ jobs:
           channel: stable
       - run: flutter pub get
       - run: flutter analyze
-      - run: flutter build apk --release --split-per-abi
+      - name: Load signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          else
+            echo "::warning::No ANDROID_KEYSTORE_BASE64 secret; signing with a throwaway debug key, so this APK can't update an earlier install."
+          fi
+      # Galaxy S23 and most phones since ~2017 are arm64, and many recent
+      # ones can't run 32-bit apps at all, so ship one arm64 APK.
+      - run: flutter build apk --release --target-platform android-arm64
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      - run: mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/AdFreeTube.apk
       - uses: actions/upload-artifact@v4
         with:
           name: adfree-tube-android
-          path: adfree_tube/build/app/outputs/flutter-apk/*.apk
+          path: adfree_tube/build/app/outputs/flutter-apk/AdFreeTube.apk
 
   macos:
     runs-on: macos-latest
