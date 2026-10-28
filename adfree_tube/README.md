@@ -42,8 +42,8 @@ This README covers two kinds of readers:
 | --- | --- |
 | Search | YouTube search with infinite scroll |
 | Open by link | Paste any YouTube URL (`youtube.com/watch?v=…`, `youtu.be/…`, Shorts) or an 11-character video id |
-| No ads | YouTube's web player is never loaded, so no ad requests are ever made |
-| Quality picker | Every resolution YouTube offers for the video, plus *Audio only* |
+| No ads | Video ads are skipped the instant they start, and ad banners are hidden |
+| Quality picker | Every resolution YouTube's player offers for the video, plus *Auto* |
 | Default quality | Chosen in Settings and remembered between launches |
 | Background playback | Keeps playing when you leave the player screen, switch apps, or lock the phone |
 | System controls | Android notification and lock screen, headset buttons, macOS media keys and Control Center |
@@ -58,66 +58,60 @@ This README covers two kinds of readers:
 
 ## How it works
 
-A normal YouTube embed loads YouTube's own web player, and that player is
-what shows ads. This app skips it entirely:
+YouTube only serves video to **its own players**. They pass an anti-bot
+check (a "PO token") that third-party players can't. Earlier versions of this
+app fetched the video files directly, and YouTube blocked every one of those
+routes (HTTP 403, "Sign in to confirm you're not a bot", no streams). So the
+app now lets **YouTube's real mobile web player** play the video, inside a
+WebView, and strips everything else away:
 
 ```
- ┌──────────────┐  search / metadata / stream URLs   ┌──────────────┐
- │  Flutter UI  │ ─────────────────────────────────▶ │   YouTube    │
- │ (lib/*.dart) │ ◀───────────────────────────────── │  (internal   │
- └──────┬───────┘   JSON + direct googlevideo.com    │    APIs)     │
-        │           media URLs                        └──────────────┘
-        │ open(url)
-        ▼
- ┌──────────────┐   decoded video frames  ┌──────────────────────┐
- │  media_kit   │ ──────────────────────▶ │ Video widget on screen│
- │  (libmpv)    │   audio ──▶ speakers    └──────────────────────┘
- └──────┬───────┘
-        │ play/pause/position
-        ▼
- ┌──────────────┐
- │audio_service │ ──▶ Android notification, lock screen, macOS media keys
- └──────────────┘
+ ┌──────────────────┐  search, details, related   ┌──────────────┐
+ │  Flutter UI      │ ──────────────────────────▶ │   YouTube    │
+ │  (lib/*.dart)    │ ◀────── youtube_explode ─── │              │
+ └───┬──────────▲───┘                             └──────▲───────┘
+     │ commands │ state (JSON, 4×/s)                      │ video
+     ▼          │                                         │
+ ┌──────────────┴───────────────────────────────┐        │
+ │ WebView: m.youtube.com/watch?v=…             │ ───────┘
+ │  + injected CSS: video fills the view,       │
+ │    site / YouTube controls / ad banners hidden│
+ │  + injected JS: skips ads, reports state,     │
+ │    keeps playing when the app is hidden       │
+ └───────────────────────────────────────────────┘
 ```
 
 1. **Finding videos.** The
    [`youtube_explode_dart`](https://pub.dev/packages/youtube_explode_dart)
-   package talks to YouTube's internal APIs, the same ones YouTube's own apps
-   use, to search, read video details, and get a *stream manifest*.
-2. **Picking a stream.** The manifest lists many streams. YouTube serves
-   high resolutions as **separate video-only and audio-only streams**, and
-   only 360p as a single "muxed" (video + audio) stream.
-   `lib/youtube_service.dart` turns the manifest into a simple list of
-   `PlaybackSource`s (one per resolution), each with a video URL and an
-   optional separate audio URL.
-3. **Proxying.** YouTube stalls or refuses stream downloads that are
-   requested in one huge piece or with unexpected headers. So the player never
-   opens YouTube's URLs directly. `lib/stream_proxy.dart` runs a tiny HTTP
-   server on `127.0.0.1`, and the player reads from it. For each request it
-   fetches the data from YouTube in chunks of at most 10 MB, using the same
-   headers and range style that `youtube_explode_dart` uses for its own
-   downloads. It also records YouTube's HTTP errors (e.g. 403) so the app can
-   show them.
-4. **Solving YouTube's JavaScript challenges.** Stream URLs come with
-   scrambled parameters (`n` and the signature) that have to be unscrambled
-   with YouTube's own player JavaScript. Without that, the web client returns
-   no usable URLs and the others are throttled. `lib/js_solver.dart` runs
-   yt-dlp's solver scripts (shipped with `youtube_explode_dart`) inside an
-   invisible WebView (`webview_flutter`), which gives the app a full
-   JavaScript engine on both Android and macOS.
-5. **Choosing a YouTube client.** YouTube hands out stream URLs per "client"
-   (Android app, VR app, TV, iOS, web). Some clients' URLs need extra tokens
-   only the official apps can make. `YoutubeService.clientOrder` lists the
-   clients to try. If no stream from one client plays, `PlaybackController`
-   fetches fresh URLs from the next client and tries again.
-6. **Playing.** [`media_kit`](https://pub.dev/packages/media_kit) wraps
-   **libmpv**, a powerful native media player. We open the video URL and,
-   if there's a separate audio stream, attach it as an *external audio
-   track*. mpv keeps the two in sync.
-7. **Background and system controls.**
+   package searches YouTube and reads video details and related videos.
+   (It is no longer used for playback.)
+2. **Playing.** `lib/yt_web_player.dart` (`YtWebPlayer`) owns a
+   [`webview_flutter`](https://pub.dev/packages/webview_flutter) WebView that
+   opens `https://m.youtube.com/watch?v=<id>` with a mobile browser user
+   agent, so the same mobile site loads on Android and macOS.
+3. **Cleaning up the page.** On every page load it injects:
+   - **CSS** that makes the `<video>` fill the WebView and hides the rest of
+     the site, YouTube's own player controls, and ad banners/overlays.
+   - **JavaScript** (`window.__adfree`) that, 4 times a second:
+     - skips video ads: when the player has the `ad-showing` class it mutes,
+       jumps to the end of the ad and clicks any *Skip* button, then restores
+       the sound;
+     - posts the player state (playing, position, duration, quality, errors)
+       to Dart through a JavaScript channel called `AdFreeBridge`;
+     - resumes playback if YouTube pauses it by itself.
+   It also overrides `document.hidden`/`visibilityState` and swallows
+   `visibilitychange` events, so YouTube never notices the app is in the
+   background.
+4. **The app's own controls.** `lib/player_view.dart` (`VideoSurface`) shows
+   the WebView with a transparent gesture layer on top, so nothing on the page
+   can be tapped (no accidental ad clicks), and draws Flutter controls:
+   play/pause, ±10 s, seek bar, fullscreen. Commands go to the page as
+   JavaScript calls such as `window.__adfree.seek(42)`.
+5. **Background and system controls.**
    [`audio_service`](https://pub.dev/packages/audio_service) runs an Android
    *foreground service* (so Android doesn't kill the app when it's hidden)
-   and publishes the "now playing" info and buttons to the OS.
+   and publishes the "now playing" info and buttons to the OS. The WebView
+   keeps playing because the page thinks it's still visible.
 
 ---
 
@@ -161,11 +155,10 @@ The main packages used:
 
 | Package | Why it's here |
 | --- | --- |
-| `youtube_explode_dart` | Search, video details, and stream URLs from YouTube |
-| `media_kit`, `media_kit_video`, `media_kit_libs_video` | Native video playback (libmpv) and the `Video` widget with built-in controls |
+| `youtube_explode_dart` | Search, video details and related videos |
+| `webview_flutter` (+ `_android`, `_wkwebview`) | The WebView that runs YouTube's player |
 | `audio_service` | Background playback service and OS media controls |
 | `shared_preferences` | Small key-value storage for settings and history |
-| `webview_flutter` | Hidden WebView used as a JavaScript engine for YouTube's challenges |
 
 ---
 
@@ -177,13 +170,13 @@ adfree_tube/
 │   ├── main.dart                 App entry point: initialises libraries, sets the theme
 │   ├── home_page.dart            Search screen, History screen, Settings screen
 │   ├── player_page.dart          Player screen: video, quality picker, description, Up next
+│   ├── player_view.dart          VideoSurface (WebView + app controls) and fullscreen
+│   ├── yt_web_player.dart        YtWebPlayer: the YouTube page, injected CSS/JS, state
 │   ├── mini_player.dart          Bottom "now playing" bar shown on other screens
 │   ├── sleep_timer.dart          Sleep-timer button and picker sheet
 │   ├── playback.dart             PlaybackController (the one app-wide player),
 │   │                             background handling, sleep timer, OS media controls
-│   ├── youtube_service.dart      Everything that talks to YouTube; builds PlaybackSources
-│   ├── stream_proxy.dart         Local HTTP proxy the player reads streams through (see below)
-│   ├── js_solver.dart            Solves YouTube's JavaScript challenges in a hidden WebView
+│   ├── youtube_service.dart      Search, video details, related videos
 │   ├── settings.dart             Saved preferences (default quality) and watch history
 │   └── widgets.dart              Shared VideoTile widget and number/duration formatting
 ├── android/                      Android project (Gradle)
@@ -195,7 +188,7 @@ adfree_tube/
 │       ├── DebugProfile.entitlements   Sandbox permissions (network access) for debug builds
 │       ├── Release.entitlements        Same, for release builds
 │       └── Configs/AppInfo.xcconfig    App name and bundle id
-├── test/                         Unit tests (`flutter test`), e.g. for the stream proxy
+├── test/                         Unit tests (`flutter test`)
 ├── pubspec.yaml                  Dependencies and app version
 ├── pubspec.lock                  Exact resolved dependency versions (commit it)
 └── analysis_options.yaml         Lint rules used by `flutter analyze`
@@ -214,9 +207,9 @@ HomePage ──tap a video──▶ PlayerPage(videoId)
                               │ uses
                               ▼
                        YoutubeService.instance                (lib/youtube_service.dart)
-                              │ returns video info + List<PlaybackSource>
+                              │ returns video info + related videos
                               ▼
-                       Player (media_kit) plays the chosen source
+                       YtWebPlayer loads m.youtube.com/watch?v=… and plays it
                               │ state changes
                               ▼
      PlayerPage / MiniPlayer / OS media controls all redraw from the controller
@@ -399,12 +392,12 @@ Enter. Scroll down to load more results. You can also paste a YouTube link or
 video id into the same bar, and it opens the video directly.
 
 **The player.**
-- Tap or click the video to show the controls (play/pause, seek bar, volume,
-  fullscreen).
-- On **macOS**: `Space` plays/pauses, `←`/`→` seek, `↑`/`↓` change volume,
-  `F` toggles fullscreen and `Esc` leaves it.
-- **Quality button:** choose a resolution, or *Audio only* (much less data, handy for music and podcasts).
-  Playback continues from the same spot.
+- Tap or click the video to show or hide the controls: play/pause, back or
+  forward 10 seconds, seek bar and fullscreen. Double-tap to play/pause.
+- If an ad starts, you'll briefly see *Skipping ad…* while the app jumps past
+  it.
+- **Quality button:** choose a resolution or *Auto*. Playback continues from
+  the same spot.
 - Tap the **description** to expand it. **Up next** shows related videos.
 
 **Background playback.** Just leave the player: go back to search, switch
@@ -426,7 +419,7 @@ off timer* to cancel it.
 *Clear* to wipe it.
 
 **Settings** (gear icon) sets the **default quality**. The app picks the
-best stream at or below that resolution, so choose a lower value to save
+best quality at or below that resolution, so choose a lower value to save
 mobile data.
 
 ---
@@ -455,41 +448,35 @@ Artifacts are kept for 90 days by default.
 
 ### When playback stops working
 
-> **Note:** the app currently uses a **patched copy** of `youtube_explode_dart`
-> in `third_party/youtube_explode_dart/` (see its `PATCHES.md`), wired in with
-> `dependency_overrides` in `pubspec.yaml`. While that override exists,
-> `flutter pub upgrade youtube_explode_dart` has no effect. To upgrade,
-> replace that folder with the new release and re-apply the patches if they
-> are still needed, or remove the folder and the override once upstream
-> includes the fix.
+YouTube changes its site regularly. Because the app uses YouTube's own
+player, most changes don't affect it, but a few can:
 
-YouTube changes its internals regularly, and when it does, search or playback
-can fail with errors like *"Could not load streams"*, HTTP 403, or videos
-that load forever. This is almost always fixed by updating
-`youtube_explode_dart`, whose maintainers keep up with those changes:
+| Symptom | Likely cause | Where to fix |
+| --- | --- | --- |
+| Ads play instead of being skipped | YouTube renamed the CSS classes it uses during ads | The `ad-showing` / skip-button selectors in `skipAds()` in `lib/yt_web_player.dart` |
+| Site elements or YouTube's own controls show over the video | YouTube renamed page elements | The `_css` block in `lib/yt_web_player.dart` |
+| Controls show 0:00 or play/pause does nothing | The player element or its API changed | `video()`, `player()` and the `api.*` functions in the injected script |
+| Playback stops in the background | YouTube found another way to detect that the page is hidden | The visibility overrides at the top of the injected script |
+| Search, details or related videos fail | YouTube changed its internal APIs | Update `youtube_explode_dart` (below) |
+
+**Debugging the page.** The quickest way to see what YouTube changed is to
+open `https://m.youtube.com/watch?v=…` in desktop Chrome with device
+emulation (DevTools → *Toggle device toolbar*), inspect the player while an
+ad plays, and compare the class names with the ones in the script. On
+Android you can also inspect the app's WebView itself: enable WebView
+debugging (`WebViewController.setWebContentsDebuggingEnabled(true)` in a
+debug build), then open `chrome://inspect` on your computer.
+
+**Updating `youtube_explode_dart`:**
 
 ```bash
 flutter pub upgrade youtube_explode_dart
-flutter run -d macos     # check it works
 ```
 
-If a new **major** version is out (e.g. 3.x → 4.x), `pub upgrade` won't take
-it automatically. Bump it with `flutter pub add youtube_explode_dart`, then
-fix any compile errors (`flutter analyze` lists them). All the code that uses
-this package is in `lib/youtube_service.dart` (plus the `yt.Video` type used
-for display), so that's the only place that should need changes. Check the
-package's [changelog](https://pub.dev/packages/youtube_explode_dart/changelog)
-and [GitHub issues](https://github.com/Hexer10/youtube_explode_dart/issues)
-for known problems.
-
-`YoutubeService.clientOrder` lists the YouTube "clients" the app asks for
-streams, in order (currently `safari` (web, HLS), `tv`, `androidVr`, `ios`, then the
-library default). When a video fails, the error box under the player lists every
-client and stream that was tried and why it failed (tap **Copy** to share
-it). If one client starts working better than the others, move it to the
-front of that list. yt-dlp's
-[PO token guide](https://github.com/yt-dlp/yt-dlp/wiki/PO-Token-Guide) is a
-good, current reference on which clients need what.
+If a new **major** version is out (e.g. 3.x → 4.x), bump it with
+`flutter pub add youtube_explode_dart` and fix any compile errors
+(`flutter analyze` lists them). All code that uses it is in
+`lib/youtube_service.dart`, plus the `yt.Video` type used for display.
 
 ### Updating other packages and Flutter
 
@@ -545,10 +532,13 @@ A few common changes, showing where to look.
 **Change the default quality or the quality list.** `AppSettings.qualities`
 and the `?? 1080` default in `preferredHeight` (`lib/settings.dart`).
 
-**Change how streams are picked** (e.g. prefer VP9/WebM over H.264).
-`YoutubeService.sources()` and `_better()` in `lib/youtube_service.dart`.
-H.264 (mp4) is preferred today because nearly every device can decode it in
-hardware, which saves battery.
+**Change what gets hidden or how ads are skipped.** Everything that touches
+the YouTube page lives in `lib/yt_web_player.dart`: `_css` (what is hidden and
+how the video is stretched to fill the view) and `_script` (`skipAds()`, the
+skip-button selectors, and the state that `tick()` reports). YouTube renames
+its CSS classes from time to time, so this is the part most likely to need
+updates. See [Debugging tips](#debugging-tips) for how to inspect the live
+page.
 
 **Change the seek-button step in the notification.** `fastForwardInterval` /
 `rewindInterval` in `PlaybackController.initSystemControls()`.
@@ -564,42 +554,57 @@ show the mini player.
 `notifyListeners()` in the setter. Read it anywhere with
 `AppSettings.instance.yourSetting`.
 
-**Add autoplay of the next video.** In `PlaybackController`, the constructor
-already listens to `player.stream.completed`. When it fires and `related` is
-not empty, call `load(related.first.id.value)`. Remember to respect an
-active sleep timer.
+**Add autoplay of the next video.** In `PlaybackController._onPlayerState()`
+(`lib/playback.dart`), check `s.ended && !_last.ended`. When that is true and
+`related` is not empty, call `load(related.first.id.value)`. Remember to
+respect an active sleep timer.
 
 **Add a feature that needs the player.** Use `PlaybackController.instance`.
-Its `player` field is a media_kit
-[`Player`](https://pub.dev/documentation/media_kit/latest/media_kit/Player-class.html)
-with `play()`, `pause()`, `seek()`, `setRate()`, `setVolume()` and so on, and
-`player.stream.*` lets you listen to changes.
+Its `player` field is a `YtWebPlayer` (`lib/yt_web_player.dart`) with
+`play()`, `pause()`, `playOrPause()`, `seek()`, `setQuality()` and
+`setVolume()`. It is also a `ValueNotifier<YtPlayerState>`, so wrap a widget
+in `ValueListenableBuilder(valueListenable: c.player, ...)` to redraw it as
+the position, buffering or ad state changes. To add a new command, add a
+function to `api` in `_script` and a Dart method that calls it through
+`_cmd()`.
 
 ### Things to know before you change playback code
 
-- **Separate audio track.** For most resolutions the audio is attached with
-  `player.setAudioTrack(AudioTrack.uri(...))` *after* the video has loaded
-  (`play()` waits for a non-zero duration first). If you change the open
-  sequence, keep that order, or the audio may be missing.
-- **Android background.** When the app goes to the background, Android
-  destroys the video surface. `didChangeAppLifecycleState()` turns off the
-  video track (`VideoTrack.no()`) so only audio is decoded, and turns it back
-  on (`VideoTrack.auto()`) when you come back.
-- **`Video` widget flags.** `pauseUponEnteringBackgroundMode: false` in
-  `player_page.dart` is what stops media_kit from pausing when the app is
-  hidden. Don't remove it.
-- **Stream URLs expire** after a few hours. If you add something like
-  "resume later", re-fetch the sources rather than storing the URLs.
+- **One WebView, one place.** The same `WebViewController` can only be shown
+  by one `WebViewWidget` at a time. `VideoSurface.fullscreenActive` makes the
+  normal player page step aside while the fullscreen page shows the video. If
+  you add another place that shows the video, follow the same pattern.
+- **The page never gets touches.** `VideoSurface` puts an opaque
+  `GestureDetector` over the WebView, so nothing on YouTube's page (ads,
+  links, its own buttons) can be tapped. Keep it that way, and draw any new
+  control in Flutter instead.
+- **Background playback** relies on two things: the script tells the page it
+  is always visible (it overrides `document.hidden` and swallows
+  `visibilitychange`), and `audio_service` runs a foreground service so
+  Android doesn't kill the app. Remove either and playback stops when the
+  screen locks.
+- **State comes from the page.** `tick()` runs every 250 ms and posts JSON to
+  the `AdFreeBridge` channel only when something changed. `YtPlayerState.fromJson`
+  turns it into Dart. If you add a field, add it on both sides and to
+  `test/player_state_test.dart`.
+- **Navigation is locked down.** `onNavigationRequest` only allows YouTube and
+  Google hosts in the main frame, so ad clicks and app-store links go nowhere.
 
 ### Debugging tips
 
 - `debugPrint('...')` writes to the `flutter run` console.
 - `flutter run` then press `v` (or use the Flutter extension) to open
   **DevTools**, which has a widget inspector, network log and performance view.
-- Android native logs: `adb logcat | grep -i -E "flutter|mpv|audioservice"`.
-- To test stream picking without the UI, write a small Dart script that calls
-  `YoutubeService.instance.sources('dQw4w9WgXcQ')` and prints the result, and
-  run it with `dart run path/to/script.dart`.
+- Android native logs: `adb logcat | grep -i -E "flutter|chromium|audioservice"`.
+- **Inspect the YouTube page itself.** Debug builds let Chrome on your
+  computer attach to the app's WebView: connect the phone with USB debugging
+  on, open `chrome://inspect` in desktop Chrome, and click **inspect** under
+  the app. You get the full DevTools (elements, console, network) for the
+  page, which is the fastest way to find new ad or skip-button class names.
+  On macOS, Safari's **Develop** menu does the same.
+- Without a phone, open <https://m.youtube.com> in desktop Chrome with device
+  emulation (DevTools → toggle device toolbar) and paste the contents of
+  `_script` into the console to try changes.
 
 ---
 
@@ -607,9 +612,9 @@ with `play()`, `pause()`, `seek()`, `setRate()`, `setVolume()` and so on, and
 
 | Problem | Fix |
 | --- | --- |
-| *"Could not load streams"*, 403 errors, or videos stuck loading | Update `youtube_explode_dart` (see [When playback stops working](#when-playback-stops-working)) |
+| Video stuck loading, or a YouTube error shows under the player | Copy the error text and see [When playback stops working](#when-playback-stops-working). Try another video first: some are blocked from playing outside youtube.com |
+| Ads play instead of being skipped, or parts of the YouTube site show over the video | YouTube changed its page. Update the selectors in `_css` / `skipAds()` in `lib/yt_web_player.dart` (see [Debugging tips](#debugging-tips)) |
 | Search shows *"Search failed"* | Check your internet connection. If it persists, update `youtube_explode_dart` |
-| No sound at high resolutions, but 360p works | The separate audio track failed to attach. Try another quality. If it's consistent, check `PlaybackController.play()` |
 | Playback stops a few minutes after locking the phone | The phone's battery saver is killing the app. *Settings → Apps → AdFree Tube → Battery → Unrestricted* (wording varies by brand; <https://dontkillmyapp.com> has per-brand steps) |
 | No notification controls on Android | Make sure notifications are allowed for the app in Android settings |
 | macOS: *"AdFree Tube can't be opened"* | Right-click → **Open**, or allow it in *System Settings → Privacy & Security* |

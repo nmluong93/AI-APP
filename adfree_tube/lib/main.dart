@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:media_kit/media_kit.dart';
 
 import 'home_page.dart';
 import 'playback.dart';
@@ -7,7 +6,6 @@ import 'settings.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  MediaKit.ensureInitialized();
   await AppSettings.load();
   await PlaybackController.instance.initSystemControls();
   runApp(const AdFreeTubeApp());

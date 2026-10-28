@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:media_kit_video/media_kit_video.dart';
 
 import 'playback.dart';
 import 'sleep_timer.dart';
 import 'widgets.dart';
-import 'youtube_service.dart';
+import 'player_view.dart';
 
 class PlayerPage extends StatefulWidget {
   final String videoId;
@@ -26,29 +25,28 @@ class _PlayerPageState extends State<PlayerPage> {
   }
 
   Future<void> _chooseQuality() async {
-    final chosen = await showModalBottomSheet<PlaybackSource>(
+    final qualities =
+        _c.state.qualities.where((q) => q != 'auto').toList();
+    final chosen = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
       builder: (context) => SafeArea(
         child: ListView(
           shrinkWrap: true,
           children: [
-            for (final s in _c.sources)
+            for (final q in [...qualities, 'auto'])
               ListTile(
-                leading: Icon(
-                  s.audioOnly ? Icons.headphones : Icons.high_quality,
-                ),
-                title: Text(s.label),
-                trailing: s == _c.current ? const Icon(Icons.check) : null,
-                onTap: () => Navigator.pop(context, s),
+                leading: const Icon(Icons.high_quality),
+                title: Text(qualityLabel(q)),
+                trailing:
+                    q == _c.state.quality ? const Icon(Icons.check) : null,
+                onTap: () => Navigator.pop(context, q),
               ),
           ],
         ),
       ),
     );
-    if (chosen != null && chosen != _c.current) {
-      await _c.changeQuality(chosen);
-    }
+    if (chosen != null) await _c.changeQuality(chosen);
   }
 
   @override
@@ -64,37 +62,7 @@ class _PlayerPageState extends State<PlayerPage> {
     final video = _c.video;
     final wide = MediaQuery.sizeOf(context).width > 1000;
 
-    final player = AspectRatio(
-      aspectRatio: 16 / 9,
-      child: Container(
-        color: Colors.black,
-        child: _c.error != null && _c.current == null
-            ? SingleChildScrollView(
-                padding: const EdgeInsets.all(12),
-                child: ErrorBox(text: _c.error!),
-              )
-            : Stack(
-                fit: StackFit.expand,
-                children: [
-                  Video(
-                    controller: _c.videoController,
-                    // Keep playing when the app is hidden or the screen locks.
-                    pauseUponEnteringBackgroundMode: false,
-                    resumeUponEnteringForegroundMode: false,
-                  ),
-                  if (_c.current?.audioOnly == true && video != null)
-                    IgnorePointer(
-                      child: Image.network(video.thumbnails.highResUrl,
-                          fit: BoxFit.contain),
-                    ),
-                  if (_c.current == null || _c.switching)
-                    const IgnorePointer(
-                      child: Center(child: CircularProgressIndicator()),
-                    ),
-                ],
-              ),
-      ),
-    );
+    const player = AspectRatio(aspectRatio: 16 / 9, child: VideoSurface());
 
     final details = video == null
         ? const SizedBox.shrink()
@@ -119,16 +87,16 @@ class _PlayerPageState extends State<PlayerPage> {
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  if (_c.sources.isNotEmpty)
+                  if (_c.state.qualities.isNotEmpty)
                     FilledButton.tonalIcon(
                       onPressed: _chooseQuality,
                       icon: const Icon(Icons.tune),
-                      label: Text(_c.current?.label ?? 'Quality'),
+                      label: Text(qualityLabel(_c.state.quality)),
                     ),
                   const SleepTimerButton(),
                 ],
               ),
-              if (_c.error != null && _c.current != null)
+              if (_c.error != null)
                 Padding(
                   padding: const EdgeInsets.only(top: 12),
                   child: ErrorBox(text: _c.error!),
@@ -164,19 +132,36 @@ class _PlayerPageState extends State<PlayerPage> {
               children: [
                 Expanded(
                   flex: 3,
-                  child: ListView(
-                    padding: const EdgeInsets.all(16),
-                    children: [player, const SizedBox(height: 16), details],
+                  child: Column(
+                    children: [
+                      const Padding(
+                        padding: EdgeInsets.fromLTRB(16, 16, 16, 0),
+                        child: player,
+                      ),
+                      Expanded(
+                        child: ListView(
+                          padding: const EdgeInsets.all(16),
+                          children: [details],
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 SizedBox(width: 420, child: ListView(children: relatedList)),
               ],
             )
-          : ListView(
+          : Column(
               children: [
                 player,
-                Padding(padding: const EdgeInsets.all(12), child: details),
-                ...relatedList,
+                Expanded(
+                  child: ListView(
+                    children: [
+                      Padding(
+                          padding: const EdgeInsets.all(12), child: details),
+                      ...relatedList,
+                    ],
+                  ),
+                ),
               ],
             ),
     );

@@ -29,11 +29,11 @@ class MiniPlayer extends StatelessWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  StreamBuilder<Duration>(
-                    stream: c.player.stream.position,
-                    builder: (context, snap) {
-                      final total = c.player.state.duration.inMilliseconds;
-                      final pos = (snap.data ?? Duration.zero).inMilliseconds;
+                  ValueListenableBuilder(
+                    valueListenable: c.player,
+                    builder: (context, s, _) {
+                      final total = s.duration.inMilliseconds;
+                      final pos = s.position.inMilliseconds;
                       return LinearProgressIndicator(
                         value: total > 0 ? (pos / total).clamp(0.0, 1.0) : 0,
                         minHeight: 2,
@@ -72,14 +72,11 @@ class MiniPlayer extends StatelessWidget {
                           ),
                         ),
                         const SleepTimerButton(compact: true),
-                        StreamBuilder<bool>(
-                          stream: c.player.stream.playing,
-                          initialData: c.player.state.playing,
-                          builder: (context, snap) => IconButton(
-                            tooltip: snap.data! ? 'Pause' : 'Play',
-                            icon: Icon(snap.data! ? Icons.pause : Icons.play_arrow),
-                            onPressed: c.player.playOrPause,
-                          ),
+                        IconButton(
+                          tooltip: c.state.playing ? 'Pause' : 'Play',
+                          icon: Icon(
+                              c.state.playing ? Icons.pause : Icons.play_arrow),
+                          onPressed: c.player.playOrPause,
                         ),
                         IconButton(
                           tooltip: 'Close',
