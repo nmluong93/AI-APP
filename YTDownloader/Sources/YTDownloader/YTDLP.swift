@@ -57,6 +57,48 @@ enum YTDLP {
         return parse(json: json, originalLink: link)
     }
 
+    static let searchPageSize = 20
+
+    /// Searches YouTube with yt-dlp's ytsearch, so no API key is needed.
+    static func search(query: String, count: Int = searchPageSize, tools: Tools) async throws -> [SearchResult] {
+        guard let ytdlp = tools.ytdlp else { throw YTDLPError.toolMissing }
+        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { throw YTDLPError.failed("Type something to search for.") }
+
+        let (status, out, err) = try await runToCompletion(
+            ytdlp,
+            arguments: ["-J", "--flat-playlist", "--no-warnings", "--color", "never", "--", "ytsearch\(count):\(query)"]
+        )
+        guard status == 0 else {
+            let message = err.split(separator: "\n").last(where: { $0.hasPrefix("ERROR") })
+                .map(String.init) ?? "yt-dlp could not search YouTube (exit code \(status))."
+            throw YTDLPError.failed(message)
+        }
+        guard let json = try JSONSerialization.jsonObject(with: out) as? [String: Any] else {
+            throw YTDLPError.failed("Unexpected response from yt-dlp.")
+        }
+        return parseSearch(json: json)
+    }
+
+    static func parseSearch(json: [String: Any]) -> [SearchResult] {
+        let rawEntries = json["entries"] as? [[String: Any]] ?? []
+        var seen = Set<String>()
+        var results: [SearchResult] = []
+        for e in rawEntries {
+            // Search can return channels or playlists too; only videos have an 11-character id.
+            guard let id = e["id"] as? String, id.count == 11, seen.insert(id).inserted else { continue }
+            results.append(SearchResult(
+                id: id,
+                title: e["title"] as? String ?? id,
+                channel: (e["channel"] as? String) ?? (e["uploader"] as? String),
+                duration: e["duration"] as? Double,
+                url: "https://www.youtube.com/watch?v=\(id)",
+                thumbnailURL: URL(string: "https://i.ytimg.com/vi/\(id)/mqdefault.jpg")
+            ))
+        }
+        return results
+    }
+
     static func parse(json: [String: Any], originalLink: String) -> FetchedMedia {
         let title = json["title"] as? String ?? "Untitled"
         if (json["_type"] as? String) == "playlist" {

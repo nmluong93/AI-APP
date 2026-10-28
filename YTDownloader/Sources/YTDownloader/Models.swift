@@ -57,6 +57,35 @@ struct VideoEntry: Identifiable, Hashable {
     var isSelected: Bool
 }
 
+/// Whether the window downloads from a pasted link or from YouTube search results.
+enum InputMode: String, CaseIterable, Identifiable {
+    case link
+    case search
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .link: return "Paste link"
+        case .search: return "Search YouTube"
+        }
+    }
+}
+
+struct SearchResult: Identifiable, Hashable {
+    let id: String
+    let title: String
+    let channel: String?
+    let duration: Double?
+    let url: String
+    let thumbnailURL: URL?
+
+    var entry: VideoEntry {
+        VideoEntry(id: id, title: title, duration: duration, url: url,
+                   playlistIndex: nil, isAvailable: true, isSelected: true)
+    }
+}
+
 struct FetchedMedia {
     let title: String
     let isPlaylist: Bool

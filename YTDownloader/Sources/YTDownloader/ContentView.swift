@@ -9,6 +9,15 @@ struct ContentView: View {
     @State private var isFetching = false
     @State private var fetchError: String?
 
+    @AppStorage("inputMode") private var modeRaw = InputMode.link.rawValue
+    @State private var query = ""
+    @State private var searchedQuery = ""
+    @State private var searchResults: [SearchResult] = []
+    @State private var isSearching = false
+    @State private var searchError: String?
+    @State private var requestedCount = 0
+    @State private var queuedResultIDs: Set<String> = []
+
     @AppStorage("mediaKind") private var kindRaw = MediaKind.video.rawValue
     @AppStorage("videoQuality") private var qualityRaw = VideoQuality.p1080.rawValue
     @AppStorage("preferH264") private var preferH264 = true
@@ -20,12 +29,26 @@ struct ContentView: View {
         ?? NSHomeDirectory()
 
     private var kind: MediaKind { MediaKind(rawValue: kindRaw) ?? .video }
+    private var mode: InputMode { InputMode(rawValue: modeRaw) ?? .link }
     private var selectedEntries: [VideoEntry] { media?.entries.filter { $0.isSelected && $0.isAvailable } ?? [] }
 
     var body: some View {
         VStack(spacing: 0) {
-            linkBar
-                .padding(16)
+            VStack(spacing: 12) {
+                Picker("", selection: $modeRaw) {
+                    ForEach(InputMode.allCases) { Text($0.title).tag($0.rawValue) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(maxWidth: 320)
+
+                if mode == .link {
+                    linkBar
+                } else {
+                    searchBar
+                }
+            }
+            .padding(16)
             Divider()
             VSplitView {
                 HStack(alignment: .top, spacing: 0) {
@@ -72,11 +95,81 @@ struct ContentView: View {
         }
     }
 
+    // MARK: Search
+
+    private var searchBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Search YouTube", text: $query)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit { search() }
+            Button { search() } label: {
+                if isSearching {
+                    ProgressView().controlSize(.small).frame(width: 50)
+                } else {
+                    Text("Search").frame(width: 50)
+                }
+            }
+            .keyboardShortcut(.defaultAction)
+            .disabled(isSearching || query.trimmingCharacters(in: .whitespaces).isEmpty || manager.tools.ytdlp == nil)
+        }
+    }
+
+    @ViewBuilder
+    private var searchPane: some View {
+        if let error = searchError {
+            placeholder(systemImage: "exclamationmark.triangle", title: "Search failed", message: error)
+        } else if isSearching && searchResults.isEmpty {
+            VStack(spacing: 10) {
+                ProgressView()
+                Text("Searching YouTube…")
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if searchResults.isEmpty {
+            placeholder(systemImage: "magnifyingglass",
+                        title: searchedQuery.isEmpty ? "Search YouTube" : "No videos found",
+                        message: searchedQuery.isEmpty
+                            ? "Type what you're looking for, then click the download button on a video. It uses the options on the right."
+                            : "Try different words.")
+        } else {
+            List {
+                ForEach(searchResults) { result in
+                    SearchResultRow(
+                        result: result,
+                        isQueued: queuedResultIDs.contains(result.id),
+                        canDownload: canDownload,
+                        onDownload: { download(result) }
+                    )
+                }
+                if canLoadMore || isSearching {
+                    HStack {
+                        Spacer()
+                        Button(isSearching ? "Loading…" : "Show more results") { search(more: true) }
+                            .disabled(isSearching)
+                        Spacer()
+                    }
+                    .padding(.vertical, 6)
+                }
+            }
+            .listStyle(.inset)
+        }
+    }
+
+    private var canDownload: Bool { manager.tools.ytdlp != nil && manager.tools.ffmpeg != nil }
+
+    private var canLoadMore: Bool {
+        !searchResults.isEmpty && searchResults.count >= requestedCount && requestedCount < 100
+    }
+
     // MARK: Items
 
     @ViewBuilder
     private var itemsPane: some View {
-        if let error = fetchError {
+        if mode == .search {
+            searchPane
+        } else if let error = fetchError {
             placeholder(systemImage: "exclamationmark.triangle", title: "Couldn't read that link", message: error)
         } else if isFetching {
             VStack(spacing: 10) {
@@ -184,20 +277,22 @@ struct ContentView: View {
                     Button("Choose…", action: chooseFolder)
                     Button("Open") { NSWorkspace.shared.open(URL(fileURLWithPath: outputFolderPath)) }
                 }
-                if media?.isPlaylist == true {
+                if mode == .link && media?.isPlaylist == true {
                     Toggle("Put playlist in its own folder", isOn: $playlistSubfolder)
                     Toggle("Number files by playlist order", isOn: $numberPlaylistFiles)
                 }
             }
 
-            Section {
-                Button(action: startDownload) {
-                    Label(downloadButtonTitle, systemImage: "arrow.down.circle.fill")
-                        .frame(maxWidth: .infinity)
+            if mode == .link {
+                Section {
+                    Button(action: startDownload) {
+                        Label(downloadButtonTitle, systemImage: "arrow.down.circle.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .controlSize(.large)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(selectedEntries.isEmpty || !canDownload)
                 }
-                .controlSize(.large)
-                .buttonStyle(.borderedProminent)
-                .disabled(selectedEntries.isEmpty || manager.tools.ytdlp == nil || manager.tools.ffmpeg == nil)
             }
         }
         .formStyle(.grouped)
@@ -248,19 +343,59 @@ struct ContentView: View {
 
     private func startDownload() {
         guard let media else { return }
-        var folder = URL(fileURLWithPath: outputFolderPath)
-        if media.isPlaylist && playlistSubfolder {
-            folder.appendPathComponent(sanitizedFolderName(media.title), isDirectory: true)
+        let options = downloadOptions(playlistTitle: media.isPlaylist ? media.title : nil)
+        manager.enqueue(selectedEntries, options: options)
+    }
+
+    /// Runs a new search, or with `more` fetches a longer list for the same query.
+    private func search(more: Bool = false) {
+        let text = more ? searchedQuery : query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !isSearching else { return }
+        let count = more ? searchResults.count + YTDLP.searchPageSize : YTDLP.searchPageSize
+        searchError = nil
+        if !more {
+            searchResults = []
+            searchedQuery = ""
         }
-        let options = DownloadOptions(
+        isSearching = true
+        let tools = manager.tools
+        Task {
+            do {
+                let results = try await YTDLP.search(query: text, count: count, tools: tools)
+                await MainActor.run {
+                    searchResults = results
+                    searchedQuery = text
+                    requestedCount = count
+                    isSearching = false
+                }
+            } catch {
+                await MainActor.run {
+                    searchError = error.localizedDescription
+                    isSearching = false
+                }
+            }
+        }
+    }
+
+    private func download(_ result: SearchResult) {
+        manager.enqueue([result.entry], options: downloadOptions(playlistTitle: nil))
+        queuedResultIDs.insert(result.id)
+    }
+
+    /// The current options. `playlistTitle` is set when downloading from a playlist.
+    private func downloadOptions(playlistTitle: String?) -> DownloadOptions {
+        var folder = URL(fileURLWithPath: outputFolderPath)
+        if let playlistTitle, playlistSubfolder {
+            folder.appendPathComponent(sanitizedFolderName(playlistTitle), isDirectory: true)
+        }
+        return DownloadOptions(
             kind: kind,
             videoQuality: VideoQuality(rawValue: qualityRaw) ?? .p1080,
             preferH264: preferH264,
             audioKbps: audioKbps,
             outputFolder: folder,
-            numberFiles: media.isPlaylist && numberPlaylistFiles
+            numberFiles: playlistTitle != nil && numberPlaylistFiles
         )
-        manager.enqueue(selectedEntries, options: options)
     }
 
     // MARK: Tool status
@@ -317,6 +452,58 @@ private struct EntryRow: View {
         }
         .contentShape(Rectangle())
         .onTapGesture { if entry.isAvailable { entry.isSelected.toggle() } }
+    }
+}
+
+private struct SearchResultRow: View {
+    let result: SearchResult
+    let isQueued: Bool
+    let canDownload: Bool
+    let onDownload: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack(alignment: .bottomTrailing) {
+                AsyncImage(url: result.thumbnailURL) { image in
+                    image.resizable().aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    Color.secondary.opacity(0.15)
+                }
+                .frame(width: 128, height: 72)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+
+                let duration = formatDuration(result.duration)
+                if !duration.isEmpty {
+                    Text(duration)
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Color.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 3))
+                        .padding(4)
+                }
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(result.title)
+                    .fontWeight(.medium)
+                    .lineLimit(2)
+                if let channel = result.channel {
+                    Text(channel)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer()
+            Button(action: onDownload) {
+                Image(systemName: isQueued ? "checkmark.circle.fill" : "arrow.down.circle.fill")
+                    .font(.title2)
+            }
+            .buttonStyle(.borderless)
+            .disabled(!canDownload)
+            .help(isQueued ? "Added to downloads. Click to download again." : "Download")
+        }
+        .padding(.vertical, 4)
     }
 }
 

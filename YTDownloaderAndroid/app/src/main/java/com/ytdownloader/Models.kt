@@ -36,6 +36,31 @@ data class VideoEntry(
     val isSelected: Boolean,
 )
 
+/** Whether the main screen downloads from a pasted link or from YouTube search results. */
+enum class InputMode(val title: String) {
+    LINK("Paste link"),
+    SEARCH("Search YouTube"),
+}
+
+data class SearchResult(
+    val id: String,
+    val title: String,
+    val channel: String?,
+    val duration: Double?,
+    val url: String,
+    val thumbnailUrl: String,
+) {
+    fun toEntry() = VideoEntry(
+        id = id,
+        title = title,
+        duration = duration,
+        url = url,
+        playlistIndex = null,
+        isAvailable = true,
+        isSelected = true,
+    )
+}
+
 data class FetchedMedia(
     val title: String,
     val isPlaylist: Boolean,

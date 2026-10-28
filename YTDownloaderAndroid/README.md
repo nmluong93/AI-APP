@@ -83,6 +83,7 @@ To update later, build again and install the new APK the same way. Your settings
 - **Allow notifications** when asked. Progress then shows in the notification shade with a **Cancel all** button, and you get a "Downloads finished" notification at the end. Downloads keep running if you switch apps or turn the screen off.
 - **From the YouTube app:** tap **Share** under a video or playlist and choose **YT Downloader**. The link is filled in and read automatically.
 - **Paste & fetch** reads the link on your clipboard.
+- **Search YouTube:** switch to the **Search YouTube** tab at the top, type what you're looking for, and tap the download arrow on any result. It is queued with the current Video/Audio and quality options. Tap **Show more results** for the next 20. Search runs through yt-dlp, so no API key or Google account is needed.
 - For playlists, use **All / None** and the checkboxes to choose videos. Private and deleted videos are greyed out and skipped.
 - Each download can be cancelled, retried, removed from the list, or opened with **Open** when finished.
 
