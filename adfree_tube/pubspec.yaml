@@ -93,3 +93,8 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+# Patched copy of youtube_explode_dart; see third_party/youtube_explode_dart/PATCHES.md
+dependency_overrides:
+  youtube_explode_dart:
+    path: third_party/youtube_explode_dart

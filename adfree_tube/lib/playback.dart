@@ -116,7 +116,7 @@ class PlaybackController extends ChangeNotifier with WidgetsBindingObserver {
     if (lastError != null) {
       error = [
         'Could not play this video. What was tried:',
-        if (_service.solverError != null) '• ${_service.solverError}',
+        '• ${_service.solverError ?? 'JavaScript solver: ready'}',
         ..._service.manifestErrors.map((e) => '• streams from $e'),
         ..._failures.map((e) => '• $e'),
       ].join('\n');
