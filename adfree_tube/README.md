@@ -455,6 +455,14 @@ Artifacts are kept for 90 days by default.
 
 ### When playback stops working
 
+> **Note:** the app currently uses a **patched copy** of `youtube_explode_dart`
+> in `third_party/youtube_explode_dart/` (see its `PATCHES.md`), wired in with
+> `dependency_overrides` in `pubspec.yaml`. While that override exists,
+> `flutter pub upgrade youtube_explode_dart` has no effect. To upgrade,
+> replace that folder with the new release and re-apply the patches if they
+> are still needed, or remove the folder and the override once upstream
+> includes the fix.
+
 YouTube changes its internals regularly, and when it does, search or playback
 can fail with errors like *"Could not load streams"*, HTTP 403, or videos
 that load forever. This is almost always fixed by updating
