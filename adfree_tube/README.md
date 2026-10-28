@@ -43,7 +43,7 @@ This README covers two kinds of readers:
 | Search | YouTube search with infinite scroll |
 | Open by link | Paste any YouTube URL (`youtube.com/watch?v=…`, `youtu.be/…`, Shorts) or an 11-character video id |
 | No ads | YouTube's web player is never loaded, so no ad requests are ever made |
-| Quality picker | Every available resolution up to 4K, plus *Auto (HLS)* and *Audio only* |
+| Quality picker | Every resolution YouTube offers for the video, plus *Audio only* |
 | Default quality | Chosen in Settings and remembered between launches |
 | Background playback | Keeps playing when you leave the player screen, switch apps, or lock the phone |
 | System controls | Android notification and lock screen, headset buttons, macOS media keys and Control Center |
@@ -98,16 +98,23 @@ what shows ads. This app skips it entirely:
    headers and range style that `youtube_explode_dart` uses for its own
    downloads. It also records YouTube's HTTP errors (e.g. 403) so the app can
    show them.
-4. **Choosing a YouTube client.** YouTube hands out stream URLs per "client"
+4. **Solving YouTube's JavaScript challenges.** Stream URLs come with
+   scrambled parameters (`n` and the signature) that have to be unscrambled
+   with YouTube's own player JavaScript. Without that, the web client returns
+   no usable URLs and the others are throttled. `lib/js_solver.dart` runs
+   yt-dlp's solver scripts (shipped with `youtube_explode_dart`) inside an
+   invisible WebView (`flutter_inappwebview`), which gives the app a full
+   JavaScript engine on both Android and macOS.
+5. **Choosing a YouTube client.** YouTube hands out stream URLs per "client"
    (Android app, VR app, TV, iOS, web). Some clients' URLs need extra tokens
    only the official apps can make. `YoutubeService.clientOrder` lists the
    clients to try. If no stream from one client plays, `PlaybackController`
    fetches fresh URLs from the next client and tries again.
-5. **Playing.** [`media_kit`](https://pub.dev/packages/media_kit) wraps
+6. **Playing.** [`media_kit`](https://pub.dev/packages/media_kit) wraps
    **libmpv**, a powerful native media player. We open the video URL and,
    if there's a separate audio stream, attach it as an *external audio
    track*. mpv keeps the two in sync.
-6. **Background and system controls.**
+7. **Background and system controls.**
    [`audio_service`](https://pub.dev/packages/audio_service) runs an Android
    *foreground service* (so Android doesn't kill the app when it's hidden)
    and publishes the "now playing" info and buttons to the OS.
@@ -158,6 +165,7 @@ The main packages used:
 | `media_kit`, `media_kit_video`, `media_kit_libs_video` | Native video playback (libmpv) and the `Video` widget with built-in controls |
 | `audio_service` | Background playback service and OS media controls |
 | `shared_preferences` | Small key-value storage for settings and history |
+| `flutter_inappwebview` | Hidden WebView used as a JavaScript engine for YouTube's challenges |
 
 ---
 
@@ -175,6 +183,7 @@ adfree_tube/
 │   │                             background handling, sleep timer, OS media controls
 │   ├── youtube_service.dart      Everything that talks to YouTube; builds PlaybackSources
 │   ├── stream_proxy.dart         Local HTTP proxy the player reads streams through (see below)
+│   ├── js_solver.dart            Solves YouTube's JavaScript challenges in a hidden WebView
 │   ├── settings.dart             Saved preferences (default quality) and watch history
 │   └── widgets.dart              Shared VideoTile widget and number/duration formatting
 ├── android/                      Android project (Gradle)
@@ -394,8 +403,7 @@ video id into the same bar, and it opens the video directly.
   fullscreen).
 - On **macOS**: `Space` plays/pauses, `←`/`→` seek, `↑`/`↓` change volume,
   `F` toggles fullscreen and `Esc` leaves it.
-- **Quality button:** choose a resolution, *Auto (HLS)* (adapts to your
-  connection), or *Audio only* (much less data, handy for music and podcasts).
+- **Quality button:** choose a resolution, or *Audio only* (much less data, handy for music and podcasts).
   Playback continues from the same spot.
 - Tap the **description** to expand it. **Up next** shows related videos.
 
@@ -467,8 +475,8 @@ and [GitHub issues](https://github.com/Hexer10/youtube_explode_dart/issues)
 for known problems.
 
 `YoutubeService.clientOrder` lists the YouTube "clients" the app asks for
-streams, in order (currently `androidVr`, `tv`, `ios`, the library default,
-`safari`). When a video fails, the error box under the player lists every
+streams, in order (currently `safari` (web, HLS), `tv`, `androidVr`, `ios`, then the
+library default). When a video fails, the error box under the player lists every
 client and stream that was tried and why it failed (tap **Copy** to share
 it). If one client starts working better than the others, move it to the
 front of that list. yt-dlp's
@@ -593,7 +601,7 @@ with `play()`, `pause()`, `seek()`, `setRate()`, `setVolume()` and so on, and
 | --- | --- |
 | *"Could not load streams"*, 403 errors, or videos stuck loading | Update `youtube_explode_dart` (see [When playback stops working](#when-playback-stops-working)) |
 | Search shows *"Search failed"* | Check your internet connection. If it persists, update `youtube_explode_dart` |
-| No sound at high resolutions, but 360p works | The separate audio track failed to attach. Try another quality or *Auto (HLS)*. If it's consistent, check `PlaybackController.play()` |
+| No sound at high resolutions, but 360p works | The separate audio track failed to attach. Try another quality. If it's consistent, check `PlaybackController.play()` |
 | Playback stops a few minutes after locking the phone | The phone's battery saver is killing the app. *Settings → Apps → AdFree Tube → Battery → Unrestricted* (wording varies by brand; <https://dontkillmyapp.com> has per-brand steps) |
 | No notification controls on Android | Make sure notifications are allowed for the app in Android settings |
 | macOS: *"AdFree Tube can't be opened"* | Right-click → **Open**, or allow it in *System Settings → Privacy & Security* |

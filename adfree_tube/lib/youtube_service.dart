@@ -1,5 +1,7 @@
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
+import 'js_solver.dart';
+
 /// One way to play a video: a video (or muxed/HLS) URL plus an optional
 /// separate audio URL that gets attached as an external audio track.
 class PlaybackSource {
@@ -28,6 +30,24 @@ class YoutubeService {
   static final instance = YoutubeService._();
 
   final _yt = YoutubeExplode();
+
+  // Stream manifests need YouTube's JavaScript challenges solved, so they use
+  // a second instance with the WebView solver. It starts on first use.
+  Future<YoutubeExplode>? _streamsYt;
+
+  /// Why the JavaScript solver isn't available, if it isn't.
+  String? solverError;
+
+  Future<YoutubeExplode> _streamsClient() => _streamsYt ??= () async {
+        final solver = await WebViewEJSSolver.tryInit();
+        if (solver == null) {
+          solverError = 'JavaScript solver failed to start';
+          _streamsYt = null; // try again next time
+          return _yt;
+        }
+        solverError = null;
+        return YoutubeExplode(jsSolver: solver);
+      }();
 
   /// Returns a video id if [input] is a YouTube URL or an 11-char id.
   static String? parseVideoId(String input) {
@@ -89,16 +109,20 @@ class YoutubeService {
     };
   }
 
-  /// YouTube clients to ask for streams, in order of preference. Stream URLs
-  /// from the plain ANDROID client (the library default) now fail to open
-  /// without a "PO token", while ANDROID_VR URLs play without one. If a
+  /// YouTube clients to ask for streams, in order of preference. If a
   /// client's streams don't play, the player moves on to the next one.
+  /// As of Oct 2026, on a real phone: ANDROID and IOS stream URLs return
+  /// HTTP 403 (they need a "PO token" only the official apps can make),
+  /// ANDROID_VR and TV report many videos as unplayable, and WEB needs the
+  /// JavaScript challenge solver.
   static final clientOrder = <List<YoutubeApiClient>?>[
-    [YoutubeApiClient.androidVr],
+    // Web (Safari) gives HLS playlists that don't need a PO token once the
+    // JavaScript challenges are solved. This is what yt-dlp relies on too.
+    [YoutubeApiClient.safari],
     [YoutubeApiClient.tv],
+    [YoutubeApiClient.androidVr],
     [YoutubeApiClient.ios],
     null, // library default (androidSdkless)
-    [YoutubeApiClient.safari],
   ];
 
   /// Why clients were skipped while fetching manifests, for error messages.
@@ -113,17 +137,21 @@ class YoutubeService {
   /// Fetches a manifest from the first client at or after [from] that
   /// returns any streams.
   Future<(StreamManifest, int)> _manifest(String id, int from) async {
+    final yt = await _streamsClient();
     Object? lastError;
     for (var i = from; i < clientOrder.length; i++) {
       try {
-        final m = await _yt.videos.streams
+        final m = await yt.videos.streams
             .getManifest(id, ytClients: clientOrder[i])
             .timeout(const Duration(seconds: 20));
         if (m.streams.isNotEmpty) return (m, i);
         manifestErrors.add('${clientName(clientOrder[i])}: no streams');
       } catch (e) {
         lastError = e;
-        final reason = '$e'.split('\n').first;
+        // Keep the first line and YouTube's stated reason, if any.
+        final lines = '$e'.split('\n');
+        final why = lines.where((l) => l.startsWith('Reason:')).join(' ');
+        final reason = [lines.first, if (why.isNotEmpty) why].join(' ');
         manifestErrors.add('${clientName(clientOrder[i])}: $reason');
       }
     }
@@ -136,6 +164,15 @@ class YoutubeService {
   Future<(List<PlaybackSource>, int)> sources(String id, {int from = 0}) async {
     final (manifest, client) = await _manifest(id, from);
     final result = <PlaybackSource>[];
+
+    // HLS playlists, one per resolution, each with a matching HLS audio
+    // playlist. For the web client these are the only streams that play
+    // without a PO token, so they go first and replace the others.
+    final hls = _hlsSources(manifest);
+    final isWeb = clientOrder[client]
+            ?.any((c) => c.payload['context']?['client']?['clientName'] == 'WEB') ??
+        false;
+    if (isWeb && hls.isNotEmpty) return (hls, client);
 
     final audios = manifest.audioOnly.toList()
       ..sort((a, b) => b.bitrate.compareTo(a.bitrate));
@@ -175,16 +212,6 @@ class YoutubeService {
       ));
     }
 
-    if (manifest.hls.isNotEmpty) {
-      final hls = manifest.hls.toList()
-        ..sort((a, b) => b.bitrate.compareTo(a.bitrate));
-      result.add(PlaybackSource(
-        label: 'Auto (HLS)',
-        height: 0,
-        videoUrl: hls.first.url.toString(),
-      ));
-    }
-
     if (bestAudio != null) {
       result.add(PlaybackSource(
         label: 'Audio only',
@@ -194,8 +221,47 @@ class YoutubeService {
       ));
     }
 
+    for (final h in hls) {
+      if (!result.any((s) => s.height == h.height)) result.add(h);
+    }
+
     if (result.isEmpty) throw Exception('No playable streams found.');
     return (result, client);
+  }
+
+  static List<PlaybackSource> _hlsSources(StreamManifest manifest) {
+    final audios = manifest.hls.whereType<HlsAudioStreamInfo>().toList()
+      ..sort((a, b) => b.bitrate.compareTo(a.bitrate));
+    final byHeight = <int, PlaybackSource>{};
+    for (final v in manifest.hls.whereType<HlsVideoStreamInfo>()) {
+      final h = v.videoResolution.height;
+      if (h <= 0 || byHeight.containsKey(h)) continue;
+      final audio = audios.where((a) => a.tag == v.audioItag).firstOrNull ??
+          audios.firstOrNull;
+      if (audio == null) continue;
+      byHeight[h] = PlaybackSource(
+        label: '${h}p',
+        height: h,
+        videoUrl: v.url.toString(),
+        audioUrl: audio.url.toString(),
+      );
+    }
+    for (final m in manifest.hls.whereType<HlsMuxedStreamInfo>()) {
+      final h = m.videoResolution.height;
+      if (h <= 0 || byHeight.containsKey(h)) continue;
+      byHeight[h] = PlaybackSource(label: '${h}p', height: h, videoUrl: m.url.toString());
+    }
+    final result = byHeight.values.toList()
+      ..sort((a, b) => b.height.compareTo(a.height));
+    if (audios.isNotEmpty) {
+      result.add(PlaybackSource(
+        label: 'Audio only',
+        height: -1,
+        videoUrl: audios.first.url.toString(),
+        audioOnly: true,
+      ));
+    }
+    return result;
   }
 
   static bool _better(VideoOnlyStreamInfo a, VideoOnlyStreamInfo b) {

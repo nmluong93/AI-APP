@@ -80,8 +80,8 @@ class PlaybackController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   /// Opens [source], keeping the current position when switching quality.
-  /// If it doesn't start playing, falls back to simpler streams (360p muxed,
-  /// then HLS) before giving up with an error message.
+  /// If it doesn't start playing, falls back to simpler streams and then to
+  /// other YouTube clients before giving up with an error message.
   Future<void> play(PlaybackSource source, {Duration? from}) async {
     final token = _loadToken;
     current = source;
@@ -116,6 +116,7 @@ class PlaybackController extends ChangeNotifier with WidgetsBindingObserver {
     if (lastError != null) {
       error = [
         'Could not play this video. What was tried:',
+        if (_service.solverError != null) '• ${_service.solverError}',
         ..._service.manifestErrors.map((e) => '• streams from $e'),
         ..._failures.map((e) => '• $e'),
       ].join('\n');
@@ -146,9 +147,8 @@ class PlaybackController extends ChangeNotifier with WidgetsBindingObserver {
   /// Simpler streams to try when [failed] doesn't play, most likely first.
   List<PlaybackSource> _fallbacks(PlaybackSource failed) {
     final muxed = sources.where((s) => s.audioUrl == null && s.height > 0);
-    final hls = sources.where((s) => s.height == 0);
     final split = sources.where((s) => s.audioUrl != null && s.height <= 720);
-    return {...muxed, ...hls, ...split}
+    return {...muxed, ...split}
         .where((s) => s != failed)
         .take(2)
         .toList();
