@@ -4,6 +4,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'downloads/download_job.dart';
+import 'downloads/downloader.dart';
+import 'downloads/downloads_page.dart';
 import 'home_page.dart';
 import 'playback.dart';
 import 'player_view.dart';
@@ -15,6 +18,8 @@ Future<void> main() async {
   await PlaybackController.instance.initSystemControls();
   const testUrl = String.fromEnvironment('PLAYER_TEST_URL');
   if (testUrl.isNotEmpty) return _renderTest(testUrl);
+  const downloadUrl = String.fromEnvironment('DOWNLOAD_TEST_URL');
+  if (downloadUrl.isNotEmpty) return _downloadTest(downloadUrl);
   runApp(const AdFreeTubeApp());
 }
 
@@ -68,6 +73,52 @@ Future<void> _renderTest(String url) async {
   await Future.delayed(const Duration(seconds: 20));
   debugPrint('RENDER_TEST PHASE back_on_player');
   showSurface.value = true;
+}
+
+/// On-device check that downloads work: downloads [url] as a video and as
+/// an MP3 through the app's own queue, showing the Downloads screen. Built
+/// only by the `downloads-android` CI job (tool/download_test/run_android.sh),
+/// which waits for the DOWNLOAD_TEST lines this logs and checks the saved
+/// files.
+Future<void> _downloadTest(String url) async {
+  final d = Downloader.instance;
+  runApp(
+    const MaterialApp(debugShowCheckedModeBanner: false, home: DownloadsPage()),
+  );
+  final reported = <int>{};
+  final last = <int, String>{};
+  d.addListener(() {
+    for (final j in d.jobs) {
+      final line = '${j.state.name} ${(j.progress * 100).round()}% ${j.detail}';
+      if (last[j.id] != line) {
+        last[j.id] = line;
+        debugPrint('DOWNLOAD_TEST job ${j.id} $line');
+      }
+      if (j.isFinished && reported.add(j.id)) {
+        debugPrint(
+          'DOWNLOAD_TEST finished kind=${j.kind.name} state=${j.state.name} '
+          'path=${j.savedPath} detail=${j.detail}',
+        );
+      }
+    }
+  });
+  debugPrint('DOWNLOAD_TEST engine ${await d.engineStatus()}');
+  await d.enqueue(
+    DownloadRequest(
+      url: url,
+      title: 'sample',
+      kind: DownloadKind.video,
+      maxHeight: 720,
+    ),
+  );
+  await d.enqueue(
+    DownloadRequest(
+      url: url,
+      title: 'sample',
+      kind: DownloadKind.audio,
+      audioKbps: 128,
+    ),
+  );
 }
 
 class AdFreeTubeApp extends StatelessWidget {

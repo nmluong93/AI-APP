@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
+import 'downloads/downloads_button.dart';
 import 'mini_player.dart';
 import 'player_page.dart';
 import 'settings.dart';
@@ -98,6 +99,7 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
         title: const Text('AdFree Tube'),
         actions: [
+          const DownloadsButton(),
           IconButton(
             tooltip: 'History',
             icon: const Icon(Icons.history),

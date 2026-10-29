@@ -9,6 +9,7 @@ import android.webkit.WebView
 import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import com.luong.adfree_tube.downloads.DownloadsChannel
 
 class MainActivity : AudioServiceActivity() {
     private val handler = Handler(Looper.getMainLooper())
@@ -45,6 +46,7 @@ class MainActivity : AudioServiceActivity() {
                     else -> result.notImplemented()
                 }
             }
+        DownloadsChannel(applicationContext, flutterEngine.dartExecutor.binaryMessenger)
     }
 
     override fun onStart() {
