@@ -3,8 +3,8 @@
 <head><meta name="viewport" content="width=device-width, initial-scale=1"></head>
 <body style="margin:0">
   <!-- Mimics the parts of m.youtube.com's watch page the app's script uses,
-       and plays a green VP9 video through Media Source Extensions (a blob:
-       URL), like YouTube does. -->
+       and plays a green VP9 video with an Opus tone through Media Source
+       Extensions (a blob: URL), like YouTube does. -->
   <header>Site header that the app hides</header>
   <div id="player-container-id" class="player-container">
     <div id="player" class="player-api player-size">
@@ -17,14 +17,26 @@
   </div>
   <div class="watch-below-the-player">Comments etc.</div>
   <script>
+    // Separate video and audio streams through two SourceBuffers, the way
+    // YouTube's player feeds its <video>.
     const v = document.querySelector('video');
     const ms = new MediaSource();
     v.src = URL.createObjectURL(ms);
+    async function feed(type, file) {
+      const sb = ms.addSourceBuffer(type);
+      const data = await (await fetch(file)).arrayBuffer();
+      await new Promise((done) => {
+        sb.addEventListener('updateend', done, { once: true });
+        sb.appendBuffer(data);
+      });
+    }
     ms.addEventListener('sourceopen', async () => {
-      const sb = ms.addSourceBuffer('video/webm; codecs="vp9"');
-      const data = await (await fetch('test.webm')).arrayBuffer();
-      sb.addEventListener('updateend', () => { ms.endOfStream(); v.play(); });
-      sb.appendBuffer(data);
+      await Promise.all([
+        feed('video/webm; codecs="vp9"', 'video.webm'),
+        feed('audio/webm; codecs="opus"', 'audio.webm'),
+      ]);
+      ms.endOfStream();
+      v.play();
     });
   </script>
 </body>

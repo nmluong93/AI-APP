@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'downloads/downloads_page.dart';
 import 'playback.dart';
 import 'sleep_timer.dart';
 import 'widgets.dart';
@@ -94,6 +95,15 @@ class _PlayerPageState extends State<PlayerPage> {
                       label: Text(qualityLabel(_c.state.quality)),
                     ),
                   const SleepTimerButton(),
+                  FilledButton.tonalIcon(
+                    onPressed: () => showDownloadSheet(
+                      context,
+                      url: 'https://www.youtube.com/watch?v=${video.id.value}',
+                      title: video.title,
+                    ),
+                    icon: const Icon(Icons.download),
+                    label: const Text('Download'),
+                  ),
                 ],
               ),
               if (_c.error != null)

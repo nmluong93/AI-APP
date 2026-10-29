@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
+import 'downloads/downloads_button.dart';
 import 'mini_player.dart';
 import 'player_page.dart';
+import 'search_input.dart';
 import 'settings.dart';
 import 'widgets.dart';
 import 'youtube_service.dart';
@@ -23,6 +25,7 @@ class _HomePageState extends State<HomePage> {
   bool _loading = false;
   bool _loadingMore = false;
   String? _error;
+  String _lastQuery = '';
 
   @override
   void initState() {
@@ -38,15 +41,18 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _submit(String text) async {
-    text = text.trim();
-    if (text.isEmpty) return;
-
-    // A pasted link or id plays straight away instead of searching.
-    final id = YoutubeService.parseVideoId(text);
-    if (id != null && (text.contains('/') || text.length == 11 && !text.contains(' '))) {
-      _open(id);
-      return;
+    final String query;
+    switch (parseSearchInput(text)) {
+      case EmptyInput():
+        return;
+      case VideoInput(:final id):
+        // A pasted link or id plays straight away instead of searching.
+        _open(id);
+        return;
+      case QueryInput(query: final q):
+        query = q;
     }
+    _lastQuery = query;
 
     setState(() {
       _loading = true;
@@ -55,14 +61,14 @@ class _HomePageState extends State<HomePage> {
       _page = null;
     });
     try {
-      final page = await YoutubeService.instance.search(text);
+      final page = await YoutubeService.instance.search(query);
       if (!mounted) return;
       setState(() {
         _page = page;
         _results.addAll(page);
       });
     } catch (e) {
-      if (mounted) setState(() => _error = 'Search failed: $e');
+      if (mounted) setState(() => _error = '$e');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -98,6 +104,7 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
         title: const Text('AdFree Tube'),
         actions: [
+          const DownloadsButton(),
           IconButton(
             tooltip: 'History',
             icon: const Icon(Icons.history),
@@ -144,7 +151,27 @@ class _HomePageState extends State<HomePage> {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
-          child: Text(_error!, textAlign: TextAlign.center),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Search didn\'t work. Check your connection and try again.',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _error!,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: () => _submit(_lastQuery),
+                icon: const Icon(Icons.refresh),
+                label: const Text('Try again'),
+              ),
+            ],
+          ),
         ),
       );
     }

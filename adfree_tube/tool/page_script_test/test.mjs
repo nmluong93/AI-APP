@@ -60,7 +60,9 @@ async function colourShare(page, test) {
 const GREEN = 'r < 60 && g > 150 && b < 60';
 const ORANGE = 'r > 220 && g > 100 && g < 180 && b < 60';
 
-const browser = await chromium.launch();
+// The app turns off the WebView's "user gesture needed to play media" rule
+// (setMediaPlaybackRequiresUserGesture(false)), so do the same here.
+const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
 try {
   for (const canvasVideo of [true, false]) {
     const page = await browser.newPage({ viewport: { width: 360, height: 202 } });

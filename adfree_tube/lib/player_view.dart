@@ -10,23 +10,142 @@ import 'settings.dart';
 import 'widgets.dart';
 import 'yt_web_player.dart';
 
+/// Decides which widget shows the player's one WebView: the newest
+/// [VideoSurface] (the player or fullscreen screen), or [background] (the
+/// 1x1 view of [BackgroundVideoHost]) when no player screen is open.
+///
+/// Workaround (bug 9 in the README "Known bugs and workarounds"): one
+/// WebView can only be on screen in one place at a time.
+///
+/// Workaround (bug 12): with hybrid composition, showing the WebView in its
+/// new place in the same frame it leaves the old one crashes the app (the
+/// Android view still has its old parent). So a change of place goes through
+/// [owner] = null first, and the new place takes over a moment later.
+class VideoHosts {
+  VideoHosts._();
+
+  static final _hosts = <Object>[];
+
+  /// Stands for [BackgroundVideoHost].
+  static final background = Object();
+
+  /// Where the WebView is shown now; null while it moves.
+  static final owner = ValueNotifier<Object?>(background);
+
+  static const handOffDelay = Duration(milliseconds: 150);
+  static int _change = 0;
+
+  static Object get _target => _hosts.isEmpty ? background : _hosts.last;
+
+  static void add(Object host) {
+    _hosts.add(host);
+    _handOff();
+  }
+
+  static void remove(Object host) {
+    _hosts.remove(host);
+    _handOff();
+  }
+
+  static void _handOff() {
+    final change = ++_change;
+    // Called from initState and dispose, so change [owner] after the
+    // current frame rather than while widgets are building.
+    Timer.run(() {
+      if (change != _change) return;
+      if (owner.value == _target) return;
+      owner.value = null;
+      Timer(handOffDelay, () {
+        if (change == _change) owner.value = _target;
+      });
+    });
+  }
+}
+
+/// The player's WebView, embedded the way Settings says.
+class PlayerWebView extends StatelessWidget {
+  const PlayerWebView({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: AppSettings.instance,
+      builder: (context, _) => _forDisplay(AppSettings.instance.videoDisplay),
+    );
+  }
+
+  Widget _forDisplay(String display) {
+    final controller = PlaybackController.instance.player.controller;
+    // Workaround (bug 7 in the README "Known bugs and workarounds"): some
+    // phones show web video black in one of Android's two ways of embedding
+    // a WebView, so the mode is a setting. 'hybrid' puts the real Android
+    // view on screen; 'texture' draws it into a Flutter texture.
+    const testHybrid = String.fromEnvironment('PLAYER_HYBRID');
+    final hybrid = testHybrid.isNotEmpty
+        ? testHybrid == 'true'
+        : display == 'hybrid';
+    if (controller.platform is AndroidWebViewController) {
+      return WebViewWidget.fromPlatformCreationParams(
+        key: ValueKey(hybrid),
+        params: AndroidWebViewWidgetCreationParams(
+          controller: controller.platform,
+          displayWithHybridComposition: hybrid,
+        ),
+      );
+    }
+    return WebViewWidget(controller: controller);
+  }
+}
+
+/// Keeps the player's WebView attached to the screen while no [VideoSurface]
+/// is open (on the search, history and settings screens, with the mini
+/// player), as a 1x1 pixel view in the corner. Wrap the app's navigator in
+/// it (`MaterialApp.builder`).
+///
+/// Workaround (bug 11 in the README "Known bugs and workarounds"): a WebView
+/// that isn't attached to the screen counts as hidden, and Chromium pauses
+/// a hidden page's video, so leaving the player screen used to stop
+/// playback.
+class BackgroundVideoHost extends StatelessWidget {
+  final Widget child;
+
+  const BackgroundVideoHost({super.key, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      alignment: Alignment.topLeft,
+      textDirection: TextDirection.ltr,
+      children: [
+        Positioned.fill(child: child),
+        ValueListenableBuilder<Object?>(
+          valueListenable: VideoHosts.owner,
+          builder: (context, owner, _) => identical(owner, VideoHosts.background)
+              ? const Positioned(
+                  left: 0,
+                  top: 0,
+                  width: 1,
+                  height: 1,
+                  child: IgnorePointer(child: PlayerWebView()),
+                )
+              : const SizedBox.shrink(),
+        ),
+      ],
+    );
+  }
+}
+
 /// The video with the app's own controls on top.
 ///
 /// The YouTube page underneath never receives touches: a full-size gesture
 /// layer covers it, so there's nothing on the page (ads, links) to tap.
 /// Only one [VideoSurface] can show the player at a time, because the same
-/// WebView can't appear in two places.
+/// WebView can't appear in two places: the most recently opened one wins
+/// (see [VideoHosts]).
 class VideoSurface extends StatefulWidget {
   final bool fullscreen;
 
   const VideoSurface({super.key, this.fullscreen = false});
-
-  /// True while the fullscreen page is showing the video, so the normal
-  /// player page leaves it alone.
-  ///
-  /// Workaround (bug 9 in the README "Known bugs and workarounds"): one
-  /// WebView can only be on screen in one place at a time.
-  static final fullscreenActive = ValueNotifier(false);
 
   @override
   State<VideoSurface> createState() => _VideoSurfaceState();
@@ -40,11 +159,13 @@ class _VideoSurfaceState extends State<VideoSurface> {
   @override
   void initState() {
     super.initState();
+    VideoHosts.add(this);
     _scheduleHide();
   }
 
   @override
   void dispose() {
+    VideoHosts.remove(this);
     _hideTimer?.cancel();
     super.dispose();
   }
@@ -62,7 +183,6 @@ class _VideoSurfaceState extends State<VideoSurface> {
   }
 
   Future<void> _openFullscreen() async {
-    VideoSurface.fullscreenActive.value = true;
     await Navigator.of(context).push(
       PageRouteBuilder<void>(
         pageBuilder: (_, _, _) => const _FullscreenPage(),
@@ -70,35 +190,6 @@ class _VideoSurfaceState extends State<VideoSurface> {
             FadeTransition(opacity: animation, child: child),
       ),
     );
-    VideoSurface.fullscreenActive.value = false;
-  }
-
-  Widget _webView() {
-    return ListenableBuilder(
-      listenable: AppSettings.instance,
-      builder: (context, _) => _webViewFor(AppSettings.instance.videoDisplay),
-    );
-  }
-
-  Widget _webViewFor(String display) {
-    final controller = _c.player.controller;
-    // Workaround (bug 7 in the README "Known bugs and workarounds"): some
-    // phones show web video black in one of Android's two ways of embedding
-    // a WebView, so the mode is a setting. 'hybrid' puts the real Android
-    // view on screen; 'texture' draws it into a Flutter texture.
-    const testHybrid = String.fromEnvironment('PLAYER_HYBRID');
-    final hybrid =
-        testHybrid.isNotEmpty ? testHybrid == 'true' : display == 'hybrid';
-    if (controller.platform is AndroidWebViewController) {
-      return WebViewWidget.fromPlatformCreationParams(
-        key: ValueKey(hybrid),
-        params: AndroidWebViewWidgetCreationParams(
-          controller: controller.platform,
-          displayWithHybridComposition: hybrid,
-        ),
-      );
-    }
-    return WebViewWidget(controller: controller);
   }
 
   Future<void> _showDiagnostics() async {
@@ -141,16 +232,16 @@ class _VideoSurfaceState extends State<VideoSurface> {
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<bool>(
-      valueListenable: VideoSurface.fullscreenActive,
-      builder: (context, fullscreenActive, _) {
-        final showWebView = widget.fullscreen || !fullscreenActive;
+    return ValueListenableBuilder<Object?>(
+      valueListenable: VideoHosts.owner,
+      builder: (context, owner, _) {
+        final showWebView = identical(owner, this);
         return Container(
           color: Colors.black,
           child: Stack(
             fit: StackFit.expand,
             children: [
-              if (showWebView) _webView(),
+              if (showWebView) const PlayerWebView(),
               // Covers the page so it never gets touches.
               GestureDetector(
                 behavior: HitTestBehavior.opaque,
