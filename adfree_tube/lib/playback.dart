@@ -127,6 +127,17 @@ class PlaybackController extends ChangeNotifier {
 
   Future<void> changeQuality(String quality) => player.setQuality(quality);
 
+  /// Used by the on-device render test (see main.dart) in place of [load]:
+  /// marks something as playing so the system media controls and the
+  /// background service start, as they do for a real video.
+  void startRenderTest() {
+    videoId = 'render-test';
+    _handler?.mediaItem.add(
+      const MediaItem(id: 'render-test', title: 'Render test'),
+    );
+    notifyListeners();
+  }
+
   /// Stops playback completely and clears the mini player.
   Future<void> close() async {
     _loadToken++;
