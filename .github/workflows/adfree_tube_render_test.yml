@@ -1,0 +1,64 @@
+name: AdFree Tube video render test
+
+# Builds a test version of the app that opens a local page with a green
+# video, runs it on an Android emulator, and measures a screenshot to see
+# whether the video inside the WebView actually shows up. Results are in
+# the "Run on emulator" step log (lines starting with RENDER_TEST).
+
+on:
+  push:
+    paths:
+      - 'adfree_tube/**'
+      - '.github/workflows/adfree_tube_render_test.yml'
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: adfree_tube
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        hybrid: [true, false]
+        impeller: [true, false]
+    name: render (hybrid=${{ matrix.hybrid }}, impeller=${{ matrix.impeller }})
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg && pip install -q pillow
+      - name: Make the test video
+        run: ffmpeg -loglevel error -f lavfi -i "color=c=0x00C800:s=640x360:r=30:d=10" -c:v libx264 -profile:v baseline -pix_fmt yuv420p tool/render_test/test.mp4
+      - name: Configure the test build
+        run: |
+          # The test page is served over plain http from the runner.
+          sed -i 's|<application|<application android:usesCleartextTraffic="true"|' android/app/src/main/AndroidManifest.xml
+          perl -0pi -e 's|(EnableImpeller"\s*android:value=")false|${1}${{ matrix.impeller }}|' android/app/src/main/AndroidManifest.xml
+          grep -n -A1 EnableImpeller android/app/src/main/AndroidManifest.xml
+      - run: flutter pub get
+      - run: >
+          flutter build apk --release --target-platform android-x64
+          --dart-define=PLAYER_TEST=true
+          --dart-define=PLAYER_TEST_URL=http://localhost:8000/index.html
+          --dart-define=PLAYER_HYBRID=${{ matrix.hybrid }}
+      - name: Run on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          working-directory: adfree_tube
+          script: bash tool/render_test/run.sh

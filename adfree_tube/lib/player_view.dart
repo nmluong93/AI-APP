@@ -59,11 +59,13 @@ class _VideoSurfaceState extends State<VideoSurface> {
 
   Future<void> _openFullscreen() async {
     VideoSurface.fullscreenActive.value = true;
-    await Navigator.of(context).push(PageRouteBuilder<void>(
-      pageBuilder: (_, _, _) => const _FullscreenPage(),
-      transitionsBuilder: (_, animation, _, child) =>
-          FadeTransition(opacity: animation, child: child),
-    ));
+    await Navigator.of(context).push(
+      PageRouteBuilder<void>(
+        pageBuilder: (_, _, _) => const _FullscreenPage(),
+        transitionsBuilder: (_, animation, _, child) =>
+            FadeTransition(opacity: animation, child: child),
+      ),
+    );
     VideoSurface.fullscreenActive.value = false;
   }
 
@@ -71,7 +73,8 @@ class _VideoSurfaceState extends State<VideoSurface> {
     final controller = _c.player.controller;
     // Android's default way of embedding the WebView (a texture) can show
     // web video as a black box; hybrid composition draws it reliably.
-    if (controller.platform is AndroidWebViewController) {
+    if (controller.platform is AndroidWebViewController &&
+        const bool.fromEnvironment('PLAYER_HYBRID', defaultValue: true)) {
       return WebViewWidget.fromPlatformCreationParams(
         params: AndroidWebViewWidgetCreationParams(
           controller: controller.platform,
@@ -90,8 +93,10 @@ class _VideoSurfaceState extends State<VideoSurface> {
       builder: (context) => AlertDialog(
         title: const Text('Player diagnostics'),
         content: SingleChildScrollView(
-          child: SelectableText(text,
-              style: const TextStyle(fontFamily: 'monospace', fontSize: 11)),
+          child: SelectableText(
+            text,
+            style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+          ),
         ),
         actions: [
           TextButton.icon(
@@ -130,10 +135,11 @@ class _VideoSurfaceState extends State<VideoSurface> {
                 onDoubleTap: () => _c.player.playOrPause(),
                 onLongPress: _showDiagnostics,
               ),
-              ValueListenableBuilder<YtPlayerState>(
-                valueListenable: _c.player,
-                builder: (context, s, _) => _overlay(context, s),
-              ),
+              if (!const bool.fromEnvironment('PLAYER_TEST'))
+                ValueListenableBuilder<YtPlayerState>(
+                  valueListenable: _c.player,
+                  builder: (context, s, _) => _overlay(context, s),
+                ),
             ],
           ),
         );
@@ -148,14 +154,18 @@ class _VideoSurfaceState extends State<VideoSurface> {
       children: [
         if (showSpinner)
           const IgnorePointer(
-            child: Center(child: CircularProgressIndicator(color: Colors.white)),
+            child: Center(
+              child: CircularProgressIndicator(color: Colors.white),
+            ),
           ),
         if (s.ad)
           const IgnorePointer(
             child: Align(
               alignment: Alignment(0, 0.4),
-              child: Text('Skipping ad…',
-                  style: TextStyle(color: Colors.white70)),
+              child: Text(
+                'Skipping ad…',
+                style: TextStyle(color: Colors.white70),
+              ),
             ),
           ),
         IgnorePointer(
@@ -193,7 +203,9 @@ class _VideoSurfaceState extends State<VideoSurface> {
                 }),
                 const SizedBox(width: 24),
                 _iconButton(
-                  s.playing ? Icons.pause_circle_filled : Icons.play_circle_fill,
+                  s.playing
+                      ? Icons.pause_circle_filled
+                      : Icons.play_circle_fill,
                   () {
                     _c.player.playOrPause();
                     _scheduleHide();
@@ -244,7 +256,11 @@ class _VideoSurfaceState extends State<VideoSurface> {
     );
   }
 
-  Widget _iconButton(IconData icon, VoidCallback onPressed, {double size = 28}) {
+  Widget _iconButton(
+    IconData icon,
+    VoidCallback onPressed, {
+    double size = 28,
+  }) {
     return IconButton(
       iconSize: size,
       color: Colors.white,

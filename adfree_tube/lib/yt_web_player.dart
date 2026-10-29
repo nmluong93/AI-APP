@@ -101,31 +101,37 @@ class YtWebPlayer extends ValueNotifier<YtPlayerState> {
       await controller.setBackgroundColor(const Color(0xFF000000));
     }
     await controller.setUserAgent(_userAgent);
-    await controller.addJavaScriptChannel('AdFreeBridge',
-        onMessageReceived: (message) {
-      try {
-        value = YtPlayerState.fromJson(
-            jsonDecode(message.message) as Map<String, dynamic>);
-      } catch (e) {
-        debugPrint('YtWebPlayer: bad state message: $e');
-      }
-    });
-    await controller.setNavigationDelegate(NavigationDelegate(
-      onPageStarted: (_) => controller.runJavaScript(_script),
-      onPageFinished: (_) => controller.runJavaScript(_script),
-      onNavigationRequest: (request) {
-        // Stay on the watch page: block app-store links, ad clicks, etc.
-        final uri = Uri.tryParse(request.url);
-        final host = uri?.host ?? '';
-        final allowed = host.endsWith('youtube.com') ||
-            host.endsWith('google.com') ||
-            host.endsWith('gstatic.com') ||
-            host.endsWith('googlevideo.com');
-        return allowed && request.isMainFrame || !request.isMainFrame
-            ? NavigationDecision.navigate
-            : NavigationDecision.prevent;
+    await controller.addJavaScriptChannel(
+      'AdFreeBridge',
+      onMessageReceived: (message) {
+        try {
+          value = YtPlayerState.fromJson(
+            jsonDecode(message.message) as Map<String, dynamic>,
+          );
+        } catch (e) {
+          debugPrint('YtWebPlayer: bad state message: $e');
+        }
       },
-    ));
+    );
+    await controller.setNavigationDelegate(
+      NavigationDelegate(
+        onPageStarted: (_) => controller.runJavaScript(_script),
+        onPageFinished: (_) => controller.runJavaScript(_script),
+        onNavigationRequest: (request) {
+          // Stay on the watch page: block app-store links, ad clicks, etc.
+          final uri = Uri.tryParse(request.url);
+          final host = uri?.host ?? '';
+          final allowed =
+              host.endsWith('youtube.com') ||
+              host.endsWith('google.com') ||
+              host.endsWith('gstatic.com') ||
+              host.endsWith('googlevideo.com');
+          return allowed && request.isMainFrame || !request.isMainFrame
+              ? NavigationDecision.navigate
+              : NavigationDecision.prevent;
+        },
+      ),
+    );
   }
 
   String? get videoId => _videoId;
@@ -135,14 +141,20 @@ class YtWebPlayer extends ValueNotifier<YtPlayerState> {
     _videoId = id;
     value = const YtPlayerState(buffering: true);
     final t = start.inSeconds > 0 ? '&t=${start.inSeconds}s' : '';
-    await controller
-        .loadRequest(Uri.parse('https://m.youtube.com/watch?v=$id$t'));
+    await controller.loadRequest(
+      Uri.parse('https://m.youtube.com/watch?v=$id$t'),
+    );
+  }
+
+  /// Opens any page. Only used by the on-device rendering test.
+  Future<void> loadUrl(String url) async {
+    _videoId = 'test';
+    await controller.loadRequest(Uri.parse(url));
   }
 
   Future<void> _cmd(String js) async {
     try {
-      await controller.runJavaScript(
-          'window.__adfree && window.__adfree.$js;');
+      await controller.runJavaScript('window.__adfree && window.__adfree.$js;');
     } catch (e) {
       debugPrint('YtWebPlayer: $e');
     }
@@ -151,8 +163,7 @@ class YtWebPlayer extends ValueNotifier<YtPlayerState> {
   Future<void> play() => _cmd('play()');
   Future<void> pause() => _cmd('pause()');
   Future<void> playOrPause() => value.playing ? pause() : play();
-  Future<void> seek(Duration to) =>
-      _cmd('seek(${to.inMilliseconds / 1000})');
+  Future<void> seek(Duration to) => _cmd('seek(${to.inMilliseconds / 1000})');
   Future<void> setQuality(String quality) =>
       _cmd('setQuality(${jsonEncode(quality)})');
 
@@ -160,7 +171,8 @@ class YtWebPlayer extends ValueNotifier<YtPlayerState> {
   Future<String> diagnostics() async {
     try {
       final result = await controller.runJavaScriptReturningResult(
-          'window.__adfree ? window.__adfree.debug() : "Player script not loaded"');
+        'window.__adfree ? window.__adfree.debug() : "Player script not loaded"',
+      );
       var text = result is String ? result : result.toString();
       // Android returns the string JSON-encoded a second time.
       if (text.startsWith('"')) {
@@ -175,13 +187,13 @@ class YtWebPlayer extends ValueNotifier<YtPlayerState> {
   }
 
   Map<String, Object?> _stateJson() => {
-        'playing': value.playing,
-        'buffering': value.buffering,
-        'ad': value.ad,
-        'position': value.position.inSeconds,
-        'duration': value.duration.inSeconds,
-        'error': value.error,
-      };
+    'playing': value.playing,
+    'buffering': value.buffering,
+    'ad': value.ad,
+    'position': value.position.inSeconds,
+    'duration': value.duration.inSeconds,
+    'error': value.error,
+  };
 
   double get volume => _volume;
   Future<void> setVolume(double v) {
@@ -194,7 +206,8 @@ class YtWebPlayer extends ValueNotifier<YtPlayerState> {
     _videoId = null;
     value = const YtPlayerState();
     await controller.loadHtmlString(
-        '<html><body style="background:#000"></body></html>');
+      '<html><body style="background:#000"></body></html>',
+    );
   }
 
   static const _css = r'''
@@ -228,7 +241,8 @@ ytm-pivot-bar-renderer, .mobile-topbar-header, ytm-app-promo-renderer,
 }
 ''';
 
-  static final _script = '''
+  static final _script =
+      '''
 (function () {
   if (window.__adfree) return;
   const api = {};
