@@ -4,7 +4,10 @@
 # shows. Exits non-zero (failing the build) if it doesn't.
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"
-(cd "$here/../page_script_test" && python3 -m http.server 8000 >/dev/null 2>&1 &)
+python3 -m http.server 8000 --directory "$here/../page_script_test" </dev/null >/dev/null 2>&1 &
+server=$!
+# The server must not outlive the script, or the CI step never finishes.
+trap 'kill $server 2>/dev/null' EXIT
 adb reverse tcp:8000 tcp:8000
 adb install -r "$here/../../build/app/outputs/flutter-apk/app-release.apk"
 adb logcat -c

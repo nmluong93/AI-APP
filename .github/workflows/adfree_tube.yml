@@ -57,6 +57,7 @@ jobs:
             canvas: false
             optional: true
     continue-on-error: ${{ matrix.optional == true }}
+    timeout-minutes: 40
     name: render (hybrid=${{ matrix.hybrid }}, canvas=${{ matrix.canvas }})
     steps:
       - uses: actions/checkout@v4
