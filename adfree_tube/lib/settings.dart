@@ -39,6 +39,27 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// How the WebView is put on screen on Android: 'hybrid' (hybrid
+  /// composition) or 'texture' (texture layer). Workaround (bug 7 in the
+  /// README "Known bugs and workarounds"): some phones show the video black
+  /// in one mode, so it can be switched in Settings.
+  String get videoDisplay => _prefs.getString('videoDisplay') ?? 'hybrid';
+
+  set videoDisplay(String value) {
+    _prefs.setString('videoDisplay', value);
+    notifyListeners();
+  }
+
+  /// Workaround (bug 7): keep the WebView from moving the video to a
+  /// separate hardware layer, by making it very slightly transparent and
+  /// rotated by a tiny angle. See `keepVisible()` in yt_web_player.dart.
+  bool get pageDrawnVideo => _prefs.getBool('pageDrawnVideo') ?? true;
+
+  set pageDrawnVideo(bool value) {
+    _prefs.setBool('pageDrawnVideo', value);
+    notifyListeners();
+  }
+
   List<HistoryEntry> get history => (_prefs.getStringList('history') ?? [])
       .map((s) => HistoryEntry.fromJson(jsonDecode(s) as Map<String, dynamic>))
       .toList();

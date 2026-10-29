@@ -37,6 +37,9 @@ dependencies:
   youtube_explode_dart: ^3.1.0
   shared_preferences: ^2.5.6
   audio_service: ^0.18.19
+  # Workaround (bug 4 in the README "Known bugs and workarounds"): the
+  # official webview_flutter, not flutter_inappwebview, whose Android build
+  # breaks with the current Android Gradle Plugin.
   webview_flutter: ^4.14.1
   webview_flutter_android: ^4.14.1
   webview_flutter_wkwebview: ^3.27.2

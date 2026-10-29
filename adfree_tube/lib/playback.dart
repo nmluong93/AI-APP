@@ -32,6 +32,18 @@ String qualityLabel(String quality) {
 class PlaybackController extends ChangeNotifier {
   PlaybackController._() {
     player.addListener(_onPlayerState);
+    final settings = AppSettings.instance;
+    player.pageDrawnVideo = settings.pageDrawnVideo;
+    player.diagnosticsHeader = () =>
+        'Display: ${settings.videoDisplay}, page-drawn video: '
+        '${settings.pageDrawnVideo}\n';
+    settings.addListener(() {
+      if (player.pageDrawnVideo == settings.pageDrawnVideo) return;
+      player.pageDrawnVideo = settings.pageDrawnVideo;
+      // The option is read when the page loads, so reload where we are.
+      final id = videoId;
+      if (id != null) player.load(id, start: state.position);
+    });
   }
 
   static final instance = PlaybackController._();
@@ -185,7 +197,7 @@ class PlaybackController extends ChangeNotifier {
           androidNotificationChannelId: 'com.luong.adfree_tube.playback',
           androidNotificationChannelName: 'Playback',
           androidNotificationIcon: 'mipmap/ic_launcher',
-          // Stay a foreground service while paused so Android never kills
+          // Workaround (bug 8): stay a foreground service while paused so Android never kills
           // playback or blocks resuming from the notification.
           androidStopForegroundOnPause: false,
           fastForwardInterval: Duration(seconds: 10),

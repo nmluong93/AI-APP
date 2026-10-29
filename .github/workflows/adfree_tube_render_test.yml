@@ -64,6 +64,8 @@ jobs:
           --dart-define=PLAYER_TEST=true
           --dart-define=PLAYER_TEST_URL=http://localhost:8000/index.html
           --dart-define=PLAYER_HYBRID=${{ matrix.hybrid }}
+      # The Gradle daemon holds several GB of memory; the emulator needs it.
+      - run: cd android && ./gradlew --stop
       - name: Run on emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:

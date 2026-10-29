@@ -37,9 +37,11 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
-        <!-- Flutter's newer renderer (Impeller) draws the WebView's video
-             layer as black while the rest of the page and the sound work.
-             The classic renderer shows it correctly. -->
+        <!-- Workaround (bug 7 in the README "Known bugs and workarounds"):
+             use Flutter's classic renderer instead of Impeller, one of the
+             suspects for the WebView video showing black on a Galaxy S23.
+             It didn't fix that on its own, but is kept while the cause is
+             narrowed down; see the README before removing it. -->
         <meta-data
             android:name="io.flutter.embedding.android.EnableImpeller"
             android:value="false" />

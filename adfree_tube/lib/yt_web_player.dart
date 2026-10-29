@@ -52,6 +52,7 @@ class YtPlayerState {
 
 /// Plays videos with YouTube's own mobile web player inside a WebView.
 ///
+/// Workaround (bug 3 in the README "Known bugs and workarounds"):
 /// YouTube only serves video to its own players (they pass an anti-bot check
 /// that third-party players can't), so instead of fetching streams ourselves
 /// we let the real player do it and strip everything else from the page:
@@ -68,6 +69,12 @@ class YtWebPlayer extends ValueNotifier<YtPlayerState> {
   }
 
   late final WebViewController controller;
+
+  /// See [AppSettings.pageDrawnVideo]. Takes effect on the next page load.
+  bool pageDrawnVideo = true;
+
+  /// Extra lines added to [diagnostics], e.g. the display mode in use.
+  String Function()? diagnosticsHeader;
   String? _videoId;
   double _volume = 1;
 
@@ -115,8 +122,8 @@ class YtWebPlayer extends ValueNotifier<YtPlayerState> {
     );
     await controller.setNavigationDelegate(
       NavigationDelegate(
-        onPageStarted: (_) => controller.runJavaScript(_script),
-        onPageFinished: (_) => controller.runJavaScript(_script),
+        onPageStarted: (_) => controller.runJavaScript(_withOptions()),
+        onPageFinished: (_) => controller.runJavaScript(_withOptions()),
         onNavigationRequest: (request) {
           // Stay on the watch page: block app-store links, ad clicks, etc.
           final uri = Uri.tryParse(request.url);
@@ -135,6 +142,9 @@ class YtWebPlayer extends ValueNotifier<YtPlayerState> {
   }
 
   String? get videoId => _videoId;
+
+  String _withOptions() =>
+      'window.__adfreeOptions = ${jsonEncode({'pageDrawnVideo': pageDrawnVideo})};\n$_script';
 
   /// Opens [id] in the player and starts playing from [start].
   Future<void> load(String id, {Duration start = Duration.zero}) async {
@@ -180,7 +190,8 @@ class YtWebPlayer extends ValueNotifier<YtPlayerState> {
           text = jsonDecode(text) as String;
         } catch (_) {}
       }
-      return 'Video: $_videoId\nState: ${jsonEncode(_stateJson())}\n$text';
+      final header = diagnosticsHeader?.call() ?? '';
+      return 'Video: $_videoId\n${header}State: ${jsonEncode(_stateJson())}\n$text';
     } catch (e) {
       return 'Could not read the player: $e';
     }
@@ -225,7 +236,6 @@ html, body { background: #000 !important; overflow: hidden !important; }
   position: fixed !important; inset: 0 !important; top: 0 !important;
   left: 0 !important; width: 100vw !important; height: 100vh !important;
   object-fit: contain !important; z-index: 2147483641 !important;
-  opacity: 0.99 !important;
 }
 /* The app draws its own controls; hide YouTube's UI and ad overlays. */
 .ytp-chrome-bottom, .ytp-chrome-top, .ytp-gradient-top, .ytp-gradient-bottom,
@@ -248,7 +258,7 @@ ytm-pivot-bar-renderer, .mobile-topbar-header, ytm-app-promo-renderer,
   const api = {};
   window.__adfree = api;
 
-  // Pretend the page is always visible so YouTube keeps playing in the
+  // Workaround (bug 8): pretend the page is always visible so YouTube keeps playing in the
   // background and with the screen off.
   try {
     Object.defineProperty(document, 'hidden', { get: () => false });
@@ -268,7 +278,7 @@ ytm-pivot-bar-renderer, .mobile-topbar-header, ytm-app-promo-renderer,
     (document.head || document.documentElement).appendChild(style);
   }
 
-  // The main player's <video>, not a muted preview elsewhere on the page.
+  // Workaround (bug 6): the main player's <video>, not a muted preview elsewhere on the page.
   const video = () =>
     document.querySelector('#movie_player video') ||
     document.querySelector('video.html5-main-video') ||
@@ -290,7 +300,7 @@ ytm-pivot-bar-renderer, .mobile-topbar-header, ytm-app-promo-renderer,
     if (p.setPlaybackQuality) p.setPlaybackQuality(q);
   };
 
-  // YouTube's mobile site starts videos muted ("Tap to unmute"), and the
+  // Workaround (bug 5): YouTube's mobile site starts videos muted ("Tap to unmute"), and the
   // app never lets taps reach the page, so turn the sound on ourselves.
   function unmute(p, el) {
     try {
@@ -349,7 +359,7 @@ ytm-pivot-bar-renderer, .mobile-topbar-header, ytm-app-promo-renderer,
     return JSON.stringify(info, null, 1);
   };
 
-  // Our CSS hides parts of the site by class name, and YouTube moves its
+  // Workaround (bug 7): our CSS hides parts of the site by class name, and YouTube moves its
   // player around between releases. If anything above the video ends up
   // hidden, the sound plays but the picture doesn't, so force the video's
   // whole chain of parents back into view. (Inline !important styles win
@@ -361,7 +371,7 @@ ytm-pivot-bar-renderer, .mobile-topbar-header, ytm-app-promo-renderer,
       if (cs.visibility !== 'visible') n.style.setProperty('visibility', 'visible', 'important');
       if (n !== el && cs.opacity !== '1') n.style.setProperty('opacity', '1', 'important');
       if (n !== el && cs.overflow !== 'visible') n.style.setProperty('overflow', 'visible', 'important');
-      if (cs.transform !== 'none') n.style.setProperty('transform', 'none', 'important');
+      if (n !== el && cs.transform !== 'none') n.style.setProperty('transform', 'none', 'important');
       if (cs.filter !== 'none') n.style.setProperty('filter', 'none', 'important');
       if (cs.contain !== 'none') n.style.setProperty('contain', 'none', 'important');
     }
@@ -371,12 +381,21 @@ ytm-pivot-bar-renderer, .mobile-topbar-header, ytm-app-promo-renderer,
     el.style.setProperty('height', '100vh', 'important');
     el.style.setProperty('object-fit', 'contain', 'important');
     el.style.setProperty('z-index', '2147483647', 'important');
-    // Android's WebView hands full-view video to a separate hardware layer
-    // that sits behind the page and shows through a transparent hole. Flutter
-    // can't composite that layer, so the hole shows up black while the sound
-    // plays. A video that isn't fully opaque is never handed off like that,
-    // so it gets drawn into the page normally. 0.99 looks no different.
-    el.style.setProperty('opacity', '0.99', 'important');
+    // Workaround (bug 7): on real phones Android's WebView can hand video to
+    // a separate hardware layer that sits behind the page and shows through
+    // a transparent hole. Flutter doesn't composite that layer, so the hole
+    // could show up black while the sound plays. Only fully opaque,
+    // unrotated video is handed off, so 0.99 opacity and a tiny rotation
+    // (both invisible) keep it drawn into the page. Settings can turn this
+    // off to compare.
+    const opts = window.__adfreeOptions || {};
+    if (opts.pageDrawnVideo !== false) {
+      el.style.setProperty('opacity', '0.99', 'important');
+      el.style.setProperty('transform', 'rotate(0.001deg)', 'important');
+    } else {
+      el.style.setProperty('opacity', '1', 'important');
+      el.style.setProperty('transform', 'none', 'important');
+    }
   }
 
   function skipAds() {

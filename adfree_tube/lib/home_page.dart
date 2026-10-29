@@ -246,6 +246,33 @@ class SettingsPage extends StatelessWidget {
                 ],
               ),
             ),
+            // Workaround (bug 7 in the README "Known bugs and workarounds"):
+            // let people switch how video is drawn if it shows black.
+            const Divider(),
+            const ListTile(
+              title: Text('Video display (Android)'),
+              subtitle: Text('If you hear sound but the video is black, '
+                  'try the other option.'),
+            ),
+            RadioGroup<String>(
+              groupValue: settings.videoDisplay,
+              onChanged: (v) => settings.videoDisplay = v!,
+              child: const Column(
+                children: [
+                  RadioListTile<String>(
+                      value: 'hybrid', title: Text('Hybrid composition')),
+                  RadioListTile<String>(
+                      value: 'texture', title: Text('Texture')),
+                ],
+              ),
+            ),
+            SwitchListTile(
+              title: const Text('Keep video drawn in the page'),
+              subtitle: const Text('Stops Android moving the video to a '
+                  'separate layer. Try turning it off if the video is black.'),
+              value: settings.pageDrawnVideo,
+              onChanged: (v) => settings.pageDrawnVideo = v,
+            ),
           ],
         ),
       ),

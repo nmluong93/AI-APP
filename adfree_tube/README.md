@@ -32,7 +32,8 @@ This README covers two kinds of readers:
 9. [Continuous integration (GitHub Actions)](#continuous-integration-github-actions)
 10. [Maintaining the app](#maintaining-the-app)
 11. [Making changes: a guided tour](#making-changes-a-guided-tour)
-12. [Troubleshooting](#troubleshooting)
+12. [Known bugs and workarounds](#known-bugs-and-workarounds)
+13. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -610,6 +611,55 @@ function to `api` in `_script` and a Dart method that calls it through
 - Without a phone, open <https://m.youtube.com> in desktop Chrome with device
   emulation (DevTools → toggle device toolbar) and paste the contents of
   `_script` into the console to try changes.
+
+---
+
+## Known bugs and workarounds
+
+Problems we hit while building the app, what caused them, and what the code
+does about them. Each workaround has a comment starting with
+`Workaround:` at the place in the code where it lives, so search for that
+word before you change or remove anything.
+
+| # | Symptom | Root cause | Workaround (where) |
+| --- | --- | --- | --- |
+| 1 | Android says *"App not installed"* on a Galaxy S23 | The APK was built for 32-bit ARM; the S23 can only run 64-bit apps | CI builds one arm64 APK (`.github/workflows/adfree_tube.yml`) |
+| 2 | *"App not installed"* when updating over an older build | Each CI build signs with a new throwaway debug key, and Android refuses an update signed by a different key | Uninstall first, or add the signing secrets ([Signing](#signing-why-updates-sometimes-say-app-not-installed)) |
+| 3 | Video stuck loading; errors such as 403, *"Sign in to confirm you're not a bot"*, *"The page needs to be reloaded"* | YouTube now only serves video to its own players, which pass an anti-bot check (PO tokens) that third-party players can't | Play with YouTube's own mobile player inside a WebView instead of fetching streams (`lib/yt_web_player.dart`) |
+| 4 | Android build fails in `flutter_inappwebview` (*"getDefaultProguardFile('proguard-android.txt') is no longer supported"*) | That plugin isn't updated for the current Android Gradle Plugin | Use the official `webview_flutter` instead (`pubspec.yaml`) |
+| 5 | Time moves but no sound | YouTube's mobile site starts videos muted and waits for a tap on *"Tap to unmute"*, and the app never lets taps reach the page | `unmute()` in `_script` (`lib/yt_web_player.dart`) |
+| 6 | Controls act on the wrong video | The page can contain more than one `<video>` | `video()` in `_script` picks the one inside `#movie_player` |
+| 7 | Sound plays but the picture is black on Android | Under investigation; see below | See below |
+| 8 | YouTube pauses when the app goes to the background or the screen locks | The page sees `visibilitychange` / `document.hidden` and pauses | `_script` reports the page as always visible; `audio_service` keeps the app alive (`lib/playback.dart`) |
+| 9 | The video disappears from one screen when shown on another | One `WebViewController` can only be shown by one `WebViewWidget` at a time | `VideoSurface.fullscreenActive` (`lib/player_view.dart`) |
+
+### Bug 7: black picture with sound on Android
+
+Diagnostics from a Galaxy S23 show the page itself is fine: the `<video>`
+decodes frames (e.g. 1920x1080), is visible, and fills the view. The picture
+is lost after that, when the WebView is put on screen. The same setup shows
+the video correctly on an Android emulator (see the render test below), so
+the cause is specific to real phones' graphics hardware.
+
+The suspects, and what the code does about each:
+
+| Suspect | Workaround | Where | Result on the S23 |
+| --- | --- | --- | --- |
+| Android's way of embedding the WebView | Two modes, switchable in **Settings → Video display**: hybrid composition (default) or texture | `_webViewFor()` in `lib/player_view.dart`, `AppSettings.videoDisplay` | Texture (first build) and hybrid both black, but not yet tried with the other workarounds |
+| The WebView moving video to a separate hardware layer that Flutter doesn't show | Video drawn 0.99 opaque and rotated 0.001 degrees, which disqualifies it; **Settings → Keep video drawn in the page** turns it off | `keepVisible()` in `_script`, `AppSettings.pageDrawnVideo` | Opacity alone: still black. With rotation: not yet tried |
+| Flutter's Impeller renderer | Turned off | `EnableImpeller` in `AndroidManifest.xml` | Still black on its own |
+| Our CSS hiding a parent of the video | Parents of the video are forced visible | `keepVisible()` in `_script` | Diagnostics show every parent visible, so not the cause |
+
+The long-press diagnostics report starts with the display mode and option
+in use, so reports can be matched to settings.
+
+To test changes without a phone, the **AdFree Tube video render test**
+workflow (`.github/workflows/adfree_tube_render_test.yml`) runs a test build
+on an Android emulator with every combination of hybrid composition and
+Impeller. It opens `tool/render_test/index.html` (a green video under an
+orange square), screenshots it, and prints lines starting with
+`RENDER_TEST` in the *Run on emulator* step: whether the WebView is visible
+(orange) and whether the video is visible (green).
 
 ---
 

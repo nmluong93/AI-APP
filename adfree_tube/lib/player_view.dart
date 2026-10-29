@@ -6,6 +6,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 import 'playback.dart';
+import 'settings.dart';
 import 'widgets.dart';
 import 'yt_web_player.dart';
 
@@ -22,6 +23,9 @@ class VideoSurface extends StatefulWidget {
 
   /// True while the fullscreen page is showing the video, so the normal
   /// player page leaves it alone.
+  ///
+  /// Workaround (bug 9 in the README "Known bugs and workarounds"): one
+  /// WebView can only be on screen in one place at a time.
   static final fullscreenActive = ValueNotifier(false);
 
   @override
@@ -70,15 +74,27 @@ class _VideoSurfaceState extends State<VideoSurface> {
   }
 
   Widget _webView() {
+    return ListenableBuilder(
+      listenable: AppSettings.instance,
+      builder: (context, _) => _webViewFor(AppSettings.instance.videoDisplay),
+    );
+  }
+
+  Widget _webViewFor(String display) {
     final controller = _c.player.controller;
-    // Android's default way of embedding the WebView (a texture) can show
-    // web video as a black box; hybrid composition draws it reliably.
-    if (controller.platform is AndroidWebViewController &&
-        const bool.fromEnvironment('PLAYER_HYBRID', defaultValue: true)) {
+    // Workaround (bug 7 in the README "Known bugs and workarounds"): some
+    // phones show web video black in one of Android's two ways of embedding
+    // a WebView, so the mode is a setting. 'hybrid' puts the real Android
+    // view on screen; 'texture' draws it into a Flutter texture.
+    const testHybrid = String.fromEnvironment('PLAYER_HYBRID');
+    final hybrid =
+        testHybrid.isNotEmpty ? testHybrid == 'true' : display == 'hybrid';
+    if (controller.platform is AndroidWebViewController) {
       return WebViewWidget.fromPlatformCreationParams(
+        key: ValueKey(hybrid),
         params: AndroidWebViewWidgetCreationParams(
           controller: controller.platform,
-          displayWithHybridComposition: true,
+          displayWithHybridComposition: hybrid,
         ),
       );
     }

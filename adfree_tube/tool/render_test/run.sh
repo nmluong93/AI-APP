@@ -10,5 +10,10 @@ adb logcat -c
 adb shell am start -n com.luong.adfree_tube/.MainActivity
 sleep 40
 adb exec-out screencap -p > shot.png
-python3 measure.py shot.png
+python3 measure.py shot.png > result.txt
 adb logcat -d | grep -E "RENDER_TEST|chromium|cr_|Impeller|flutter" | tail -60
+adb logcat -d | grep "RENDER_TEST" >> result.txt
+# Print the results last (and as annotations) so they're easy to find.
+echo "---- results ----"
+cat result.txt
+while read -r line; do echo "::notice::$line"; done < result.txt

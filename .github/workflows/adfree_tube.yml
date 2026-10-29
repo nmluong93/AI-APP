@@ -30,6 +30,8 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
+      # Workaround (bug 2 in the adfree_tube README): without a fixed key every
+      # build is signed differently and Android refuses to update over it.
       - name: Load signing key
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -40,6 +42,7 @@ jobs:
           else
             echo "::warning::No ANDROID_KEYSTORE_BASE64 secret; signing with a throwaway debug key, so this APK can't update an earlier install."
           fi
+      # Workaround (bug 1 in the adfree_tube README "Known bugs and workarounds"):
       # Galaxy S23 and most phones since ~2017 are arm64, and many recent
       # ones can't run 32-bit apps at all, so ship one arm64 APK.
       - run: flutter build apk --release --target-platform android-arm64
