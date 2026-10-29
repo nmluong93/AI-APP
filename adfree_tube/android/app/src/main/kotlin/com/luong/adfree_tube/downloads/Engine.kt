@@ -57,7 +57,10 @@ object Engine {
                 FFmpeg.getInstance().init(app)
                 autoUpdate(app)
                 State.Ready(YoutubeDL.getInstance().versionName(app))
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
+                // Throwable, not Exception: a missing native library or class
+                // is an Error, and must turn into "downloads unavailable", not
+                // close the app (bug 14).
                 State.Failed(e.message ?: "Could not set up yt-dlp")
             }
         }
@@ -71,7 +74,7 @@ object Engine {
         try {
             updateLock.withLock { YoutubeDL.getInstance().updateYoutubeDL(app, channel) }
             prefs.edit().putLong(LAST_AUTO_UPDATE, now).apply()
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             // Try again on the next launch.
         }
     }
@@ -83,7 +86,7 @@ object Engine {
             val status = updateLock.withLock { YoutubeDL.getInstance().updateYoutubeDL(app, channel) }
             _state.value = State.Ready(YoutubeDL.getInstance().versionName(app))
             status == YoutubeDL.UpdateStatus.DONE
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             false
         }
     }
@@ -107,7 +110,7 @@ object Engine {
                 YoutubeDL.UpdateStatus.ALREADY_UP_TO_DATE -> "yt-dlp is already up to date (${version ?: "latest"})."
                 else -> "yt-dlp update finished."
             }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             "Update failed: ${e.message ?: "unknown error"}"
         }
     }

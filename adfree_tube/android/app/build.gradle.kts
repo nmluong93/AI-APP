@@ -75,6 +75,8 @@ android {
             signingConfig = signingConfigs.getByName(
                 if (releaseKeystore != null) "release" else "debug"
             )
+            // Keep rules for the download libraries (bug 14).
+            proguardFiles("proguard-rules.pro")
         }
     }
 }

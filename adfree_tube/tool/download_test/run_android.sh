@@ -26,6 +26,11 @@ for i in $(seq 1 60); do
 done
 adb logcat -d | grep -E "DOWNLOAD_TEST|youtubedl|AndroidRuntime" | tail -80
 adb exec-out screencap -p > "$here/downloads.png"
+# Crashes go to their own log buffer, which other apps' chatter can't push
+# out of the way.
+echo "---- crashes ----"
+adb logcat -d -b crash | tail -60
+
 
 fail=0
 check() { # check <state line pattern>

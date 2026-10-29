@@ -154,7 +154,7 @@ object DownloadQueue {
             }
         } catch (e: YoutubeDL.CanceledException) {
             setState(id, JobState.Cancelled)
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             if (id in cancelRequested) {
                 setState(id, JobState.Cancelled)
             } else {
@@ -182,7 +182,7 @@ object DownloadQueue {
         }
     }
 
-    private fun Exception.isForbidden() = message.orEmpty().contains("HTTP Error 403")
+    private fun Throwable.isForbidden() = message.orEmpty().contains("HTTP Error 403")
 
     private fun setState(id: Long, state: JobState) =
         modify(id) { it.copy(state = state, detail = if (state is JobState.Cancelled) "" else it.detail) }

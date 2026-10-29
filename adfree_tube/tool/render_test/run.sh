@@ -68,6 +68,10 @@ state awake
 mark end
 
 adb logcat -d | grep -E "chromium|cr_|flutter|AudioService" | tail -40
+# Crashes go to their own log buffer, which other apps' chatter can't push
+# out of the way.
+echo "---- crashes ----"
+adb logcat -d -b crash | tail -60
 echo "---- system log about the app ----"
 adb logcat -d | grep -E "ActivityManager|AndroidRuntime|DEBUG|libc|Freezer|freez|adfree_tube|sandboxed_process|lowmemorykiller" | grep -v RENDER_TEST | tail -60
 adb logcat -d -v epoch | grep "RENDER_TEST" > "$here/positions.txt"
