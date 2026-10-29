@@ -42,6 +42,7 @@ This README covers two kinds of readers:
 
 | Feature | Details |
 | --- | --- |
+| Latest from your topics | Home shows the newest videos for topics you pick (saved on the device), loading in the background each time the app opens; the last feed shows instantly meanwhile |
 | Search | YouTube search with infinite scroll |
 | Open by link | Paste any YouTube URL (`youtube.com/watch?v=…`, `youtu.be/…`, Shorts) or an 11-character video id |
 | No ads | Video ads are skipped the instant they start, and ad banners are hidden |
@@ -171,7 +172,9 @@ The main packages used:
 adfree_tube/
 ├── lib/                          ← all the app's Dart code
 │   ├── main.dart                 App entry point: initialises libraries, sets the theme
-│   ├── home_page.dart            Search screen, History screen, Settings screen
+│   ├── home_page.dart            Home (topic feed + search), History screen, Settings screen
+│   ├── topic_feed.dart           TopicFeed: newest videos for the saved topics, cached between launches
+│   ├── topics_page.dart          "Your topics" screen: add, remove and suggested topics
 │   ├── player_page.dart          Player screen: video, quality picker, description, Up next
 │   ├── player_view.dart          VideoSurface (WebView + app controls) and fullscreen
 │   ├── yt_web_player.dart        YtWebPlayer: the YouTube page, injected CSS/JS, state
@@ -181,7 +184,7 @@ adfree_tube/
 │   │                             background handling, sleep timer, OS media controls
 │   ├── youtube_service.dart      Search, video details, related videos
 │   ├── search_input.dart         What the search bar text means: a link/id to open or words to search
-│   ├── settings.dart             Saved preferences (default quality) and watch history
+│   ├── settings.dart             Saved preferences (default quality), watch history, topics, feed cache
 │   ├── downloads/                Downloads: queue (Downloader), Android and Mac versions,
 │   │                             yt-dlp options, Downloads screen and download sheet
 │   └── widgets.dart              Shared VideoTile widget and number/duration formatting
@@ -405,9 +408,21 @@ run, and download **adfree-tube-android** (contains `AdFreeTube.apk`) or
 
 ## Using the app
 
+**Latest videos from your topics.** The first time, Home asks you to
+*Choose topics*: tap suggestions such as *Music* or *Football*, or type
+any words (a subject, a channel, a game) and press Enter. From then on,
+every time you open the app Home shows the newest videos for those topics,
+newest first. The feed you saw last time appears straight away and the
+fresh one loads in the background (a thin bar at the top shows it's
+refreshing), so the app stays responsive. Tap a topic chip to see only
+that topic, pull down to refresh, and use **Edit** (or the topics icon at
+the top) to change them. Coming back to the app after 30 minutes or more
+refreshes it too.
+
 **Find something to watch.** Type in the search bar at the top and press
 Enter. Scroll down to load more results. You can also paste a YouTube link or
-video id into the same bar, and it opens the video directly.
+video id into the same bar, and it opens the video directly. Tap **✕** in
+the bar (or Back on Android) to return to your topic feed.
 
 **The player.**
 - Tap or click the video to show or hide the controls: play/pause, back or
