@@ -54,8 +54,15 @@ state() {
   done
 }
 
-# The app itself leaves the player screen at ~20 s and comes back at ~40 s.
-sleep 36
+# The app itself leaves the player screen ~20 s after the page loads and
+# comes back ~20 s later. How long the page takes to load varies, so wait
+# for the app to say it's back rather than a fixed time, then give that
+# phase 12 s of readings before going home.
+for _ in $(seq 1 90); do
+  adb logcat -d | grep -q "RENDER_TEST PHASE back_on_player" && break
+  sleep 1
+done
+sleep 12
 state player
 mark home
 adb shell input keyevent KEYCODE_HOME
