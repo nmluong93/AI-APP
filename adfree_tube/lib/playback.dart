@@ -295,6 +295,9 @@ class _MediaHandler extends BaseAudioHandler with SeekHandler {
       updatePosition: st.position,
     );
     playbackState.add(_lastPublished!);
+    // Read by the emulator test (tool/render_test/run.sh) to check the
+    // media notification, and so the foreground service, is running.
+    debugPrint('MEDIA_STATE playing=${st.playing} processing=${processing.name}');
   }
 
   @override

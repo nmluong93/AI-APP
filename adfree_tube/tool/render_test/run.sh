@@ -11,11 +11,16 @@ here="$(cd "$(dirname "$0")" && pwd)"
 python3 -m http.server 8000 --directory "$here/../page_script_test" </dev/null >/dev/null 2>&1 &
 server=$!
 # The server must not outlive the script, or the CI step never finishes.
-trap 'kill $server 2>/dev/null' EXIT
+trap 'kill $server ${logger:-} 2>/dev/null' EXIT
 adb reverse tcp:8000 tcp:8000
 adb install -r "$here/../../build/app/outputs/flutter-apk/app-release.apk"
 # Background audio needs the app's media notification; allow it up front.
 adb shell pm grant com.luong.adfree_tube android.permission.POST_NOTIFICATIONS 2>/dev/null
+adb logcat -c
+# Keep the whole log in a file: the emulator's own buffer is small and other
+# apps fill it.
+adb logcat -v epoch > "$here/full.log" 2>/dev/null &
+logger=$!
 mark() { adb shell log -t RENDER_TEST "PHASE $1"; echo "phase: $1"; }
 
 # A fresh emulator sometimes puts a system dialog (e.g. "Google isn't
@@ -42,7 +47,8 @@ done
 # about to be frozen or killed).
 state() {
   echo "-- state ($1) --"
-  adb shell dumpsys activity services com.luong.adfree_tube | grep -E "ServiceRecord|isForeground" | head -6
+  adb shell dumpsys activity services com.luong.adfree_tube/com.ryanheise.audioservice.AudioService | grep -E "ServiceRecord|isForeground|foregroundId|startRequested|createdFromFg" | head -8
+  adb shell dumpsys notification --noredact | grep -E "pkg=com.luong.adfree_tube" | head -3
   for p in $(adb shell pidof com.luong.adfree_tube) $(adb shell pgrep -f sandboxed_process); do
     echo "pid $p $(adb shell cat /proc/$p/cmdline | tr '\0' ' ' | cut -c1-60) adj=$(adb shell cat /proc/$p/oom_score_adj)"
   done
@@ -67,7 +73,8 @@ sleep 12
 state awake
 mark end
 
-adb logcat -d | grep -E "chromium|cr_|flutter|AudioService" | tail -40
+kill $logger 2>/dev/null
+grep -E "MEDIA_STATE|AudioService|ForegroundService|startForeground|flutter|adfree_tube" "$here/full.log" | grep -v RENDER_TEST | tail -60
 # Crashes go to their own log buffer, which other apps' chatter can't push
 # out of the way.
 echo "---- crashes ----"
