@@ -74,7 +74,7 @@ state awake
 mark end
 
 kill $logger 2>/dev/null
-grep -E "MEDIA_STATE|AudioService|ForegroundService|startForeground|flutter|adfree_tube" "$here/full.log" | grep -v RENDER_TEST | tail -60
+grep -E "MEDIA_STATE|AudioService|ForegroundService|startForeground|flutter|adfree_tube|System.err|Exception" "$here/full.log" | grep -v RENDER_TEST | tail -120
 # Crashes go to their own log buffer, which other apps' chatter can't push
 # out of the way.
 echo "---- crashes ----"

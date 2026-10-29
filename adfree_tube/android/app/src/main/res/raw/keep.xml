@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Workaround (bug 15 in the README): audio_service looks its notification
+     icons up by name, so the release build's resource shrinker can't see they
+     are used and removes them. Android 13+ then refuses the media controls
+     (an icon id of 0), the service never becomes a foreground service, and
+     Android freezes the app soon after the screen goes off. -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/audio_service_*,@mipmap/ic_launcher" />
