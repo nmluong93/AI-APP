@@ -212,6 +212,7 @@ html, body { background: #000 !important; overflow: hidden !important; }
   position: fixed !important; inset: 0 !important; top: 0 !important;
   left: 0 !important; width: 100vw !important; height: 100vh !important;
   object-fit: contain !important; z-index: 2147483641 !important;
+  opacity: 0.99 !important;
 }
 /* The app draws its own controls; hide YouTube's UI and ad overlays. */
 .ytp-chrome-bottom, .ytp-chrome-top, .ytp-gradient-top, .ytp-gradient-bottom,
@@ -344,7 +345,7 @@ ytm-pivot-bar-renderer, .mobile-topbar-header, ytm-app-promo-renderer,
       const cs = getComputedStyle(n);
       if (cs.display === 'none') n.style.setProperty('display', 'block', 'important');
       if (cs.visibility !== 'visible') n.style.setProperty('visibility', 'visible', 'important');
-      if (cs.opacity !== '1') n.style.setProperty('opacity', '1', 'important');
+      if (n !== el && cs.opacity !== '1') n.style.setProperty('opacity', '1', 'important');
       if (n !== el && cs.overflow !== 'visible') n.style.setProperty('overflow', 'visible', 'important');
       if (cs.transform !== 'none') n.style.setProperty('transform', 'none', 'important');
       if (cs.filter !== 'none') n.style.setProperty('filter', 'none', 'important');
@@ -356,6 +357,12 @@ ytm-pivot-bar-renderer, .mobile-topbar-header, ytm-app-promo-renderer,
     el.style.setProperty('height', '100vh', 'important');
     el.style.setProperty('object-fit', 'contain', 'important');
     el.style.setProperty('z-index', '2147483647', 'important');
+    // Android's WebView hands full-view video to a separate hardware layer
+    // that sits behind the page and shows through a transparent hole. Flutter
+    // can't composite that layer, so the hole shows up black while the sound
+    // plays. A video that isn't fully opaque is never handed off like that,
+    // so it gets drawn into the page normally. 0.99 looks no different.
+    el.style.setProperty('opacity', '0.99', 'important');
   }
 
   function skipAds() {
