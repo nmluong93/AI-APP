@@ -180,6 +180,7 @@ adfree_tube/
 │   ├── playback.dart             PlaybackController (the one app-wide player),
 │   │                             background handling, sleep timer, OS media controls
 │   ├── youtube_service.dart      Search, video details, related videos
+│   ├── search_input.dart         What the search bar text means: a link/id to open or words to search
 │   ├── settings.dart             Saved preferences (default quality) and watch history
 │   ├── downloads/                Downloads: queue (Downloader), Android and Mac versions,
 │   │                             yt-dlp options, Downloads screen and download sheet
@@ -196,6 +197,7 @@ adfree_tube/
 │       ├── Release.entitlements        Same, for release builds
 │       └── Configs/AppInfo.xcconfig    App name and bundle id
 ├── test/                         Unit tests (`flutter test`)
+├── third_party/youtube_explode_dart/  Patched copy of the search library (bug 13)
 ├── tool/page_script_test/       Browser test of the injected page script + YouTube-like test page
 ├── tool/render_test/            Emulator video and background-playback check (`render` CI job)
 ├── tool/download_test/          Sample video and the emulator download check (`downloads-android` CI job)
@@ -478,7 +480,9 @@ Tests gate the builds: no APK or Mac app is produced unless they pass.
 | `test/player_state_test.dart` | Parsing the player state the page sends | `flutter test` |
 | `test/settings_test.dart` | Setting defaults (black-video workarounds on), saving, history, and the Settings screen switches | `flutter test` |
 | `test/video_hosts_test.dart` | The WebView moves between screens through a gap (bug 12) | `flutter test` |
-| `test/youtube_service_test.dart` | Finding the video id in pasted links | `flutter test` |
+| `test/search_input_test.dart` | What the search bar does with what you type: about 70 cases of links (watch, youtu.be, shorts, live, embed, music, with extra parameters), bare ids, 11-letter words that aren't ids, other sites, symbols, Vietnamese text, odd spaces, blank input | `flutter test` |
+| `test/search_parsing_test.dart` | Reading YouTube's results page from a fake YouTube: ordinary results, the query sent, and every odd result we know of (streamed, premiered, scheduled, live, missing fields, unreadable results) without failing the search (bug 13) | `flutter test` |
+| `test/search_screen_test.dart` | The search screen end to end with a fake YouTube: results show, spaces tidied, blank input ignored, errors show *Try again*, which repeats the search | `flutter test` |
 | `test/page_script_contract_test.dart` | The page script still has every command the app calls, the workarounds are wired in, and Impeller stays off | `flutter test` |
 | `tool/page_script_test/test.mjs` | The injected page script in a real Chromium on `youtube_like.html` (same element ids as m.youtube.com, video through Media Source Extensions like YouTube): plays unmuted, fills the view, hides the site, reports state, canvas drawing, test square, pause/play, with the canvas on and off | `node tool/page_script_test/test.mjs` (needs Node and Playwright) |
 | `test/downloads_test.dart` | yt-dlp options, progress and error parsing, the Android job format, and the Mac/desktop download queue (with a fake yt-dlp: saving, naming, errors, retry, cancel), plus real yt-dlp downloads of a local sample to MP4 and MP3 | `flutter test` (the real-yt-dlp part is skipped unless `yt-dlp` and `ffmpeg` are installed) |
@@ -687,6 +691,7 @@ word before you change or remove anything.
 | 10 | Playback stops when you press Home or the screen turns off (Android) | Android tells the WebView its window is hidden; Chromium then pauses the page's media and lowers the renderer's priority, so hiding it from the page (bug 8) isn't enough | `MainActivity.kt` keeps every WebView marked visible, resumed and at important priority while the app is in the background; the `render` CI job checks it |
 | 11 | Playback stops when you leave the player screen for search or history | A WebView that isn't on screen at all counts as hidden too | `BackgroundVideoHost` keeps the WebView attached as a 1x1 pixel view while no player screen is open (`lib/player_view.dart`) |
 | 12 | The app closes when the video moves between screens (player, fullscreen, the background view) in hybrid display mode | Android can't add the WebView to its new place while it still has its old parent | `VideoHosts` takes the WebView out first and puts it in its new place 150 ms later (`lib/player_view.dart`); `test/video_hosts_test.dart` checks it |
+| 13 | Some searches fail with *"FormatException: Invalid radix-10 number … Streamed"* | youtube_explode_dart 3.1.0 can't read some dates YouTube puts on results (e.g. *"Streamed 2 weeks ago"* with a non-breaking space) or the view count of live videos, and one bad result failed the whole search | A patched copy of the package in `third_party/youtube_explode_dart` (`dependency_overrides` in `pubspec.yaml`; search for *AdFree Tube patch*): odd dates and lengths give null, and a result that still can't be read is skipped. Remove it when a fixed version is on pub.dev |
 
 ### Bug 7: black picture with sound on Android
 
