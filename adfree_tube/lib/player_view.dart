@@ -115,6 +115,13 @@ class _VideoSurfaceState extends State<VideoSurface> {
           ),
         ),
         actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              _c.player.showTestSquare();
+            },
+            child: const Text('Test square'),
+          ),
           TextButton.icon(
             onPressed: () async {
               await Clipboard.setData(ClipboardData(text: text));

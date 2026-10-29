@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+<head><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="margin:0">
+  <!-- Mimics the parts of m.youtube.com's watch page the app's script uses,
+       and plays a green VP9 video through Media Source Extensions (a blob:
+       URL), like YouTube does. -->
+  <header>Site header that the app hides</header>
+  <div id="player-container-id" class="player-container">
+    <div id="player" class="player-api player-size">
+      <div id="movie_player" class="html5-video-player">
+        <div class="html5-video-container">
+          <video class="video-stream html5-main-video" muted playsinline></video>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="watch-below-the-player">Comments etc.</div>
+  <script>
+    const v = document.querySelector('video');
+    const ms = new MediaSource();
+    v.src = URL.createObjectURL(ms);
+    ms.addEventListener('sourceopen', async () => {
+      const sb = ms.addSourceBuffer('video/webm; codecs="vp9"');
+      const data = await (await fetch('test.webm')).arrayBuffer();
+      sb.addEventListener('updateend', () => { ms.endOfStream(); v.play(); });
+      sb.appendBuffer(data);
+    });
+  </script>
+</body>
+</html>

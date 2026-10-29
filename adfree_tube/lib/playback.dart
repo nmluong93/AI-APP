@@ -33,16 +33,20 @@ class PlaybackController extends ChangeNotifier {
   PlaybackController._() {
     player.addListener(_onPlayerState);
     final settings = AppSettings.instance;
-    player.pageDrawnVideo = settings.pageDrawnVideo;
+    const testCanvas = String.fromEnvironment('PLAYER_CANVAS');
+    void syncOptions() {
+      player.pageDrawnVideo = settings.pageDrawnVideo;
+      player.canvasVideo =
+          testCanvas.isNotEmpty ? testCanvas == 'true' : settings.canvasVideo;
+    }
+
+    syncOptions();
     player.diagnosticsHeader = () =>
         'Display: ${settings.videoDisplay}, page-drawn video: '
-        '${settings.pageDrawnVideo}\n';
+        '${player.pageDrawnVideo}, canvas: ${player.canvasVideo}\n';
     settings.addListener(() {
-      if (player.pageDrawnVideo == settings.pageDrawnVideo) return;
-      player.pageDrawnVideo = settings.pageDrawnVideo;
-      // The option is read when the page loads, so reload where we are.
-      final id = videoId;
-      if (id != null) player.load(id, start: state.position);
+      syncOptions();
+      player.applyOptions();
     });
   }
 

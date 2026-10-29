@@ -190,6 +190,8 @@ adfree_tube/
 │       ├── Release.entitlements        Same, for release builds
 │       └── Configs/AppInfo.xcconfig    App name and bundle id
 ├── test/                         Unit tests (`flutter test`)
+├── tool/page_script_test/       Browser test of the injected page script + YouTube-like test page
+├── tool/render_test/            Emulator screenshot check used by the `render` CI job
 ├── pubspec.yaml                  Dependencies and app version
 ├── pubspec.lock                  Exact resolved dependency versions (commit it)
 └── analysis_options.yaml         Lint rules used by `flutter analyze`
@@ -432,10 +434,27 @@ runs when files under `adfree_tube/` (or the workflow itself) change, on
 pushes and pull requests, and can be started by hand from the Actions tab
 (*Run workflow*).
 
-| Job | Runner | Steps |
+Tests gate the builds: no APK or Mac app is produced unless they pass.
+
+| Job | Runner | Needs | Steps |
+| --- | --- | --- | --- |
+| `test` | Ubuntu | | `flutter analyze` → `flutter test` → page script browser test (`tool/page_script_test/test.mjs`) |
+| `render` | Ubuntu + Android emulator | `test` | Builds a test version of the app, runs it on an emulator against a YouTube-like page, and fails if a screenshot doesn't show the video (see [Tests](#tests)) |
+| `android` | Ubuntu | `test`, `render` | load signing key (if set) → `flutter build apk --target-platform android-arm64` → upload `AdFreeTube.apk` |
+| `macos` | macOS | `test` | `flutter build macos` → zip the `.app` → upload |
+
+### Tests
+
+| Test | What it protects | Run it locally |
 | --- | --- | --- |
-| `android` | Ubuntu | `flutter pub get` → `flutter analyze` → `flutter test` → load signing key (if set) → `flutter build apk --target-platform android-arm64` → upload `AdFreeTube.apk` |
-| `macos` | macOS | `flutter pub get` → `flutter build macos` → zip the `.app` → upload |
+| `test/player_state_test.dart` | Parsing the player state the page sends | `flutter test` |
+| `test/settings_test.dart` | Setting defaults (black-video workarounds on), saving, history, and the Settings screen switches | `flutter test` |
+| `test/youtube_service_test.dart` | Finding the video id in pasted links | `flutter test` |
+| `test/page_script_contract_test.dart` | The page script still has every command the app calls, the workarounds are wired in, and Impeller stays off | `flutter test` |
+| `tool/page_script_test/test.mjs` | The injected page script in a real Chromium on `youtube_like.html` (same element ids as m.youtube.com, video through Media Source Extensions like YouTube): plays unmuted, fills the view, hides the site, reports state, canvas drawing, test square, pause/play, with the canvas on and off | `node tool/page_script_test/test.mjs` (needs Node and Playwright) |
+| `render` CI job (`tool/render_test/`) | The whole app on an Android emulator: the video really appears on screen, in both display modes | CI only (needs KVM) |
+
+Add a test with every bug fix, so the bug can't come back unnoticed.
 
 Every `run:` step runs inside `adfree_tube/` (set by `defaults.run.working-directory`).
 Note that `actions/upload-artifact` paths are relative to the **repo root**,
@@ -645,6 +664,7 @@ The suspects, and what the code does about each:
 
 | Suspect | Workaround | Where | Result on the S23 |
 | --- | --- | --- | --- |
+| Anything about how the phone puts the video layer on screen | Each video frame is copied into a `<canvas>` over the video, which is drawn like any other page content (**Settings → Draw video through a canvas**, on by default) | `drawFrame()` in `_script`, `AppSettings.canvasVideo` | Not yet tried |
 | Android's way of embedding the WebView | Two modes, switchable in **Settings → Video display**: hybrid composition (default) or texture | `_webViewFor()` in `lib/player_view.dart`, `AppSettings.videoDisplay` | Texture (first build) and hybrid both black, but not yet tried with the other workarounds |
 | The WebView moving video to a separate hardware layer that Flutter doesn't show | Video drawn 0.99 opaque and rotated 0.001 degrees, which disqualifies it; **Settings → Keep video drawn in the page** turns it off | `keepVisible()` in `_script`, `AppSettings.pageDrawnVideo` | Opacity alone: still black. With rotation: not yet tried |
 | Flutter's Impeller renderer | Turned off | `EnableImpeller` in `AndroidManifest.xml` | Still black on its own |
@@ -653,13 +673,15 @@ The suspects, and what the code does about each:
 The long-press diagnostics report starts with the display mode and option
 in use, so reports can be matched to settings.
 
-To test changes without a phone, the **AdFree Tube video render test**
-workflow (`.github/workflows/adfree_tube_render_test.yml`) runs a test build
-on an Android emulator with every combination of hybrid composition and
-Impeller. It opens `tool/render_test/index.html` (a green video under an
-orange square), screenshots it, and prints lines starting with
-`RENDER_TEST` in the *Run on emulator* step: whether the WebView is visible
-(orange) and whether the video is visible (green).
+The `render` CI job (see [Tests](#tests)) runs a test build on an Android
+emulator against `tool/page_script_test/youtube_like.html` (a green video),
+screenshots it, and fails if the green video isn't on screen. Its results are
+the lines starting with `RENDER_TEST` at the end of the *Run on emulator*
+step. The emulator shows the video even without the canvas, so it can't
+reproduce the S23 bug itself; it guards against breaking the video
+completely. On a phone, long-press the video and use **Test square** in the
+diagnostics dialog: if the orange square shows but the video doesn't, the
+WebView is on screen and only the video is lost.
 
 ---
 

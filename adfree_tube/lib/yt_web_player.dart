@@ -70,8 +70,11 @@ class YtWebPlayer extends ValueNotifier<YtPlayerState> {
 
   late final WebViewController controller;
 
-  /// See [AppSettings.pageDrawnVideo]. Takes effect on the next page load.
+  /// See [AppSettings.pageDrawnVideo]. Apply changes with [applyOptions].
   bool pageDrawnVideo = true;
+
+  /// See [AppSettings.canvasVideo]. Apply changes with [applyOptions].
+  bool canvasVideo = true;
 
   /// Extra lines added to [diagnostics], e.g. the display mode in use.
   String Function()? diagnosticsHeader;
@@ -143,8 +146,23 @@ class YtWebPlayer extends ValueNotifier<YtPlayerState> {
 
   String? get videoId => _videoId;
 
-  String _withOptions() =>
-      'window.__adfreeOptions = ${jsonEncode({'pageDrawnVideo': pageDrawnVideo})};\n$_script';
+  String get _optionsJs =>
+      'window.__adfreeOptions = ${jsonEncode({'pageDrawnVideo': pageDrawnVideo, 'canvasVideo': canvasVideo})};';
+
+  String _withOptions() => '$_optionsJs\n$_script';
+
+  /// Sends changed options to the page; the script reads them live.
+  Future<void> applyOptions() async {
+    try {
+      await controller.runJavaScript(_optionsJs);
+    } catch (e) {
+      debugPrint('YtWebPlayer: $e');
+    }
+  }
+
+  /// Shows an orange square on the page for a few seconds. If it shows up,
+  /// the WebView itself is on screen, whatever happens to the video.
+  Future<void> showTestSquare() => _cmd('testSquare()');
 
   /// Opens [id] in the player and starts playing from [start].
   Future<void> load(String id, {Duration start = Duration.zero}) async {
@@ -314,9 +332,81 @@ ytm-pivot-bar-renderer, .mobile-topbar-header, ytm-app-promo-renderer,
   }
 
   // Everything useful for working out why the video doesn't show or play.
+  // Workaround (bug 7 in the README "Known bugs and workarounds"): on some
+  // phones (a Galaxy S23) the <video> plays and is on the page, but its
+  // picture never reaches the screen inside the app, while it does on an
+  // emulator. Whatever the phone does with the video layer, a <canvas> is
+  // drawn like any other page content, so copy each video frame into a
+  // canvas laid over the video. Costs a little battery; Settings can turn
+  // it off.
+  let canvasFrames = 0;
+  let lastFrameTime = -1;
+  function canvas() {
+    let c = document.getElementById('__adfree_canvas');
+    if (!c) {
+      c = document.createElement('canvas');
+      c.id = '__adfree_canvas';
+      c.style.cssText = 'position:fixed!important;left:0!important;top:0!important;' +
+        'width:100vw!important;height:100vh!important;z-index:2147483646!important;' +
+        'background:#000!important;pointer-events:none!important;display:block!important';
+      document.documentElement.appendChild(c);
+    }
+    return c;
+  }
+  function drawFrame() {
+    const opts = window.__adfreeOptions || {};
+    const el = video();
+    const existing = document.getElementById('__adfree_canvas');
+    if (opts.canvasVideo === false || !el || !el.videoWidth) {
+      if (existing) existing.style.setProperty('display', 'none', 'important');
+      return;
+    }
+    const c = canvas();
+    c.style.setProperty('display', 'block', 'important');
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const W = Math.round(innerWidth * dpr), H = Math.round(innerHeight * dpr);
+    const resized = c.width !== W || c.height !== H;
+    if (resized) { c.width = W; c.height = H; }
+    // Skip redrawing a paused frame.
+    if (!resized && el.currentTime === lastFrameTime) return;
+    lastFrameTime = el.currentTime;
+    const g = c.getContext('2d');
+    const s = Math.min(W / el.videoWidth, H / el.videoHeight);
+    const w = el.videoWidth * s, h = el.videoHeight * s;
+    g.fillStyle = '#000';
+    g.fillRect(0, 0, W, H);
+    try {
+      g.drawImage(el, (W - w) / 2, (H - h) / 2, w, h);
+      canvasFrames++;
+    } catch (e) {}
+  }
+  (function loop() {
+    drawFrame();
+    requestAnimationFrame(loop);
+  })();
+
+  api.testSquare = () => {
+    const d = document.createElement('div');
+    d.style.cssText = 'position:fixed!important;left:0!important;top:0!important;' +
+      'width:30vw!important;height:30vh!important;background:rgb(255,140,0)!important;' +
+      'z-index:2147483647!important;pointer-events:none!important';
+    document.documentElement.appendChild(d);
+    setTimeout(() => d.remove(), 5000);
+  };
+
   api.debug = () => {
     const p = player();
     const info = {
+      options: window.__adfreeOptions || null,
+      canvasFrames: canvasFrames,
+      canvasCentre: (() => {
+        const c = document.getElementById('__adfree_canvas');
+        if (!c || !c.width) return null;
+        try {
+          const d = c.getContext('2d').getImageData(c.width >> 1, c.height >> 1, 1, 1).data;
+          return d[0] + ',' + d[1] + ',' + d[2] + ' (' + c.style.display + ')';
+        } catch (e) { return 'unreadable: ' + e; }
+      })(),
       url: location.href,
       title: document.title,
       hidden: document.hidden,

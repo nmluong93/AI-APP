@@ -15,8 +15,96 @@ defaults:
   run:
     working-directory: adfree_tube
 
+# No APK or Mac app is built unless every test passes:
+#   test    -> analyzer, Dart unit and widget tests, and the page script
+#              tested in a real browser on a YouTube-like page
+#   render  -> the app on an Android emulator, checking from a screenshot
+#              that the video actually shows (the black-video bug)
+#   android -> the APK, only after test and render pass
+#   macos   -> the Mac app, only after test passes
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Page script browser test
+        run: |
+          npm install --no-save --prefix "$RUNNER_TEMP/pw" playwright@1.63.0
+          NODE_PATH="$RUNNER_TEMP/pw/node_modules" "$RUNNER_TEMP/pw/node_modules/.bin/playwright" install --with-deps chromium
+          NODE_PATH="$RUNNER_TEMP/pw/node_modules" node tool/page_script_test/test.mjs
+
+  render:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        hybrid: [true, false]
+        canvas: [true]
+        # Without the canvas the video only shows on some devices (it does
+        # on the emulator, not on a Galaxy S23); run it for information only.
+        include:
+          - hybrid: true
+            canvas: false
+            optional: true
+    continue-on-error: ${{ matrix.optional == true }}
+    name: render (hybrid=${{ matrix.hybrid }}, canvas=${{ matrix.canvas }})
+    steps:
+      - uses: actions/checkout@v4
+      # The runner's disk is too full for the Flutter build plus an emulator
+      # system image, so remove toolchains this job doesn't use.
+      - name: Free disk space
+        working-directory: .
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/share/boost \
+            /usr/share/swift /usr/local/lib/node_modules /opt/hostedtoolcache/CodeQL \
+            /usr/local/share/powershell /usr/local/share/chromium /opt/microsoft
+          sudo docker image prune --all --force >/dev/null || true
+          df -h /
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: pip install -q pillow
+      # The test page is served over plain http from the runner.
+      - run: sed -i 's|<application|<application android:usesCleartextTraffic="true"|' android/app/src/main/AndroidManifest.xml
+      - run: flutter pub get
+      - run: >
+          flutter build apk --release --target-platform android-x64
+          --dart-define=PLAYER_TEST=true
+          --dart-define=PLAYER_TEST_URL=http://localhost:8000/youtube_like.html
+          --dart-define=PLAYER_HYBRID=${{ matrix.hybrid }}
+          --dart-define=PLAYER_CANVAS=${{ matrix.canvas }}
+      # The Gradle daemon holds several GB of memory; the emulator needs it.
+      - run: cd android && ./gradlew --stop
+      - name: Run on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          working-directory: adfree_tube
+          script: bash tool/render_test/run.sh
+
   android:
+    needs: [test, render]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,8 +116,6 @@ jobs:
         with:
           channel: stable
       - run: flutter pub get
-      - run: flutter analyze
-      - run: flutter test
       # Workaround (bug 2 in the adfree_tube README): without a fixed key every
       # build is signed differently and Android refuses to update over it.
       - name: Load signing key
@@ -57,6 +143,7 @@ jobs:
           path: adfree_tube/build/app/outputs/flutter-apk/AdFreeTube.apk
 
   macos:
+    needs: test
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4

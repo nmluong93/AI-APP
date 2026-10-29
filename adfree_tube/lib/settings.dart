@@ -60,6 +60,15 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Workaround (bug 7): copy video frames into a page canvas instead of
+  /// relying on the video layer. See `drawFrame()` in yt_web_player.dart.
+  bool get canvasVideo => _prefs.getBool('canvasVideo') ?? true;
+
+  set canvasVideo(bool value) {
+    _prefs.setBool('canvasVideo', value);
+    notifyListeners();
+  }
+
   List<HistoryEntry> get history => (_prefs.getStringList('history') ?? [])
       .map((s) => HistoryEntry.fromJson(jsonDecode(s) as Map<String, dynamic>))
       .toList();

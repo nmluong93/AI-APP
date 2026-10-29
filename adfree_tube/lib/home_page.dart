@@ -267,6 +267,13 @@ class SettingsPage extends StatelessWidget {
               ),
             ),
             SwitchListTile(
+              title: const Text('Draw video through a canvas'),
+              subtitle: const Text('Copies each frame onto the page. Fixes '
+                  'black video on some phones; uses a little more battery.'),
+              value: settings.canvasVideo,
+              onChanged: (v) => settings.canvasVideo = v,
+            ),
+            SwitchListTile(
               title: const Text('Keep video drawn in the page'),
               subtitle: const Text('Stops Android moving the video to a '
                   'separate layer. Try turning it off if the video is black.'),
