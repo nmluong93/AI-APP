@@ -10,20 +10,56 @@ import 'settings.dart';
 import 'widgets.dart';
 import 'yt_web_player.dart';
 
-/// The widgets that want to show the one WebView, oldest first. The newest
-/// one shows it.
+/// Decides which widget shows the player's one WebView: the newest
+/// [VideoSurface] (the player or fullscreen screen), or [background] (the
+/// 1x1 view of [BackgroundVideoHost]) when no player screen is open.
 ///
 /// Workaround (bug 9 in the README "Known bugs and workarounds"): one
 /// WebView can only be on screen in one place at a time.
+///
+/// Workaround (bug 12): with hybrid composition, showing the WebView in its
+/// new place in the same frame it leaves the old one crashes the app (the
+/// Android view still has its old parent). So a change of place goes through
+/// [owner] = null first, and the new place takes over a moment later.
 class VideoHosts {
   VideoHosts._();
 
-  static final hosts = ValueNotifier<List<Object>>(const []);
+  static final _hosts = <Object>[];
 
-  static void add(Object host) => hosts.value = [...hosts.value, host];
+  /// Stands for [BackgroundVideoHost].
+  static final background = Object();
 
-  static void remove(Object host) =>
-      hosts.value = [...hosts.value]..remove(host);
+  /// Where the WebView is shown now; null while it moves.
+  static final owner = ValueNotifier<Object?>(background);
+
+  static const handOffDelay = Duration(milliseconds: 150);
+  static int _change = 0;
+
+  static Object get _target => _hosts.isEmpty ? background : _hosts.last;
+
+  static void add(Object host) {
+    _hosts.add(host);
+    _handOff();
+  }
+
+  static void remove(Object host) {
+    _hosts.remove(host);
+    _handOff();
+  }
+
+  static void _handOff() {
+    final change = ++_change;
+    // Called from initState and dispose, so change [owner] after the
+    // current frame rather than while widgets are building.
+    Timer.run(() {
+      if (change != _change) return;
+      if (owner.value == _target) return;
+      owner.value = null;
+      Timer(handOffDelay, () {
+        if (change == _change) owner.value = _target;
+      });
+    });
+  }
 }
 
 /// The player's WebView, embedded the way Settings says.
@@ -82,9 +118,9 @@ class BackgroundVideoHost extends StatelessWidget {
       textDirection: TextDirection.ltr,
       children: [
         Positioned.fill(child: child),
-        ValueListenableBuilder<List<Object>>(
-          valueListenable: VideoHosts.hosts,
-          builder: (context, hosts, _) => hosts.isEmpty
+        ValueListenableBuilder<Object?>(
+          valueListenable: VideoHosts.owner,
+          builder: (context, owner, _) => identical(owner, VideoHosts.background)
               ? const Positioned(
                   left: 0,
                   top: 0,
@@ -196,10 +232,10 @@ class _VideoSurfaceState extends State<VideoSurface> {
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<List<Object>>(
-      valueListenable: VideoHosts.hosts,
-      builder: (context, hosts, _) {
-        final showWebView = hosts.isNotEmpty && identical(hosts.last, this);
+    return ValueListenableBuilder<Object?>(
+      valueListenable: VideoHosts.owner,
+      builder: (context, owner, _) {
+        final showWebView = identical(owner, this);
         return Container(
           color: Colors.black,
           child: Stack(

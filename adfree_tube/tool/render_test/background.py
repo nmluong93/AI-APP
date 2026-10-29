@@ -2,7 +2,8 @@
 each phase of the render test: on the player, after leaving the player
 screen, back on it, in the background, and with the screen off.
 Input: `adb logcat -v epoch` lines containing RENDER_TEST.
-Exits 1 if any phase played at less than 70% of real time."""
+Exits 1 if any phase played at less than 70% of real time, or if the
+readings stop before the phase ends (the app was frozen or killed)."""
 import re
 import sys
 
@@ -25,6 +26,9 @@ for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
 phases.sort(key=lambda x: x[1])
 # The first window starts once the page has had time to load.
 names = {"start": "on_player"}
+# Readings come every 3 s; a longer gap at the end of a phase means the app
+# stopped running.
+MAX_GAP = 8
 failed = False
 for i, (name, start) in enumerate(phases):
     if name == "end":
@@ -42,9 +46,11 @@ for i, (name, start) in enumerate(phases):
     wall = known[-1][0] - known[0][0]
     media = known[-1][1] - known[0][1]
     ratio = media / wall if wall > 0 else 0
-    ok = ratio >= 0.7
+    silent = end - known[-1][0] if end != float("inf") else 0
+    ok = ratio >= 0.7 and silent <= MAX_GAP
     failed |= not ok
+    note = f", but no readings for the last {silent:.0f}s" if silent > MAX_GAP else ""
     print(f"PHASE_RESULT {label}: {'PASS' if ok else 'FAIL'}, video advanced "
-          f"{media:.1f}s in {wall:.1f}s ({ratio:.0%} of real time, {len(known)} readings)")
+          f"{media:.1f}s in {wall:.1f}s ({ratio:.0%} of real time, {len(known)} readings){note}")
 print("RENDER_TEST verdict: background playback " + ("FAILED" if failed else "OK"))
 sys.exit(1 if failed else 0)

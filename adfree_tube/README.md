@@ -2,7 +2,8 @@
 
 A personal YouTube player for **macOS** and **Android**, written in
 [Flutter](https://flutter.dev). It searches YouTube and plays videos **without
-ads**, keeps playing in the background, and has a sleep timer.
+ads**, keeps playing in the background, has a sleep timer, and downloads
+videos as **MP4** or their sound as **MP3**.
 
 This README covers two kinds of readers:
 
@@ -46,7 +47,8 @@ This README covers two kinds of readers:
 | No ads | Video ads are skipped the instant they start, and ad banners are hidden |
 | Quality picker | Every resolution YouTube's player offers for the video, plus *Auto* |
 | Default quality | Chosen in Settings and remembered between launches |
-| Background playback | Keeps playing when you leave the player screen, switch apps, or lock the phone |
+| Background playback | Keeps playing when you leave the player screen, switch apps, or lock the phone (checked on an Android emulator by every build) |
+| Downloads | Save the video as MP4 (Best, 1080p, 720p, 480p or 360p) or the sound as MP3 (320, 192 or 128 kbps), with a Downloads screen showing progress, cancel, retry and open |
 | System controls | Android notification and lock screen, headset buttons, macOS media keys and Control Center |
 | Mini player | A small bar at the bottom of other screens showing what's playing |
 | Sleep timer | Pauses after 5 min to 2 h (or a custom time), fading out the volume first |
@@ -179,19 +181,24 @@ adfree_tube/
 │   │                             background handling, sleep timer, OS media controls
 │   ├── youtube_service.dart      Search, video details, related videos
 │   ├── settings.dart             Saved preferences (default quality) and watch history
+│   ├── downloads/                Downloads: queue (Downloader), Android and Mac versions,
+│   │                             yt-dlp options, Downloads screen and download sheet
 │   └── widgets.dart              Shared VideoTile widget and number/duration formatting
 ├── android/                      Android project (Gradle)
 │   └── app/src/main/
 │       ├── AndroidManifest.xml   Permissions, background media service declaration
-│       └── kotlin/.../MainActivity.kt   Extends AudioServiceActivity (needed by audio_service)
+│       └── kotlin/.../
+│           ├── MainActivity.kt   Extends AudioServiceActivity; keeps the WebView playing in the background
+│           └── downloads/        yt-dlp download queue, foreground service, saving to Movies/Music
 ├── macos/                        macOS project (Xcode)
 │   └── Runner/
-│       ├── DebugProfile.entitlements   Sandbox permissions (network access) for debug builds
+│       ├── DebugProfile.entitlements   Permissions (network access, no sandbox) for debug builds
 │       ├── Release.entitlements        Same, for release builds
 │       └── Configs/AppInfo.xcconfig    App name and bundle id
 ├── test/                         Unit tests (`flutter test`)
 ├── tool/page_script_test/       Browser test of the injected page script + YouTube-like test page
-├── tool/render_test/            Emulator screenshot check used by the `render` CI job
+├── tool/render_test/            Emulator video and background-playback check (`render` CI job)
+├── tool/download_test/          Sample video and the emulator download check (`downloads-android` CI job)
 ├── pubspec.yaml                  Dependencies and app version
 ├── pubspec.lock                  Exact resolved dependency versions (commit it)
 └── analysis_options.yaml         Lint rules used by `flutter analyze`
@@ -246,6 +253,12 @@ current **stable** channel (Dart 3.x).
    sudo xcodebuild -license accept
    brew install cocoapods
    ```
+3. For **downloads** on the Mac, install the tools the app runs:
+   ```bash
+   brew install yt-dlp ffmpeg deno
+   ```
+   (The Android app carries its own copy of these, so the phone needs
+   nothing extra.)
 
 ### 3. For Android builds
 
@@ -418,6 +431,20 @@ button shows a countdown. When it reaches zero, the volume fades out over
 about five seconds and playback pauses. Open the timer again and choose *Turn
 off timer* to cancel it.
 
+**Downloads.** On the player screen tap **Download**, choose *Video (MP4)*
+with a quality or *Audio (MP3)* with a bitrate, and tap *Download*. The
+**download icon** at the top of the search screen opens the Downloads
+screen, with a badge counting running downloads. There you can watch
+progress, cancel, retry a failed one, and tap a finished one to open it.
+- On **Android** files go to *Movies/AdFree Tube* and *Music/AdFree Tube*,
+  so they show up in Gallery, Samsung Music and My Files. Downloads keep
+  going with the app in the background (there's a notification).
+- On **macOS** files go to *~/Downloads/AdFree Tube*; tapping one shows it in
+  Finder.
+- If downloads start failing with *HTTP 403*, YouTube has changed: tap
+  **Update yt-dlp** (top right of the Downloads screen) and retry. Android
+  also updates yt-dlp by itself once a day and on a 403.
+
 **History** (clock icon, top right) lists the videos you've opened. Use
 *Clear* to wipe it.
 
@@ -438,9 +465,10 @@ Tests gate the builds: no APK or Mac app is produced unless they pass.
 
 | Job | Runner | Needs | Steps |
 | --- | --- | --- | --- |
-| `test` | Ubuntu | | `flutter analyze` → `flutter test` → page script browser test (`tool/page_script_test/test.mjs`) |
-| `render` | Ubuntu + Android emulator | `test` | Builds a test version of the app, runs it on an emulator against a YouTube-like page, and fails if a screenshot doesn't show the video (see [Tests](#tests)) |
-| `android` | Ubuntu | `test`, `render` | load signing key (if set) → `flutter build apk --target-platform android-arm64` → upload `AdFreeTube.apk` |
+| `test` | Ubuntu | | `flutter analyze` → install yt-dlp and ffmpeg → `flutter test` → page script browser test (`tool/page_script_test/test.mjs`) |
+| `render` | Ubuntu + Android emulator | `test` | Builds a test version of the app, runs it on an emulator against a YouTube-like page, and fails if a screenshot doesn't show the video or if it stops playing after leaving the player, pressing Home, or turning the screen off (see [Tests](#tests)) |
+| `downloads-android` | Ubuntu + Android emulator | `test` | Builds a test version that downloads `tool/download_test/sample.mp4` as MP4 and MP3 with the app's own yt-dlp, and fails unless both files land in Movies/ and Music/ and `ffprobe` finds H.264+AAC and MP3 in them |
+| `android` | Ubuntu | `test`, `render`, `downloads-android` | load signing key (if set) → `flutter build apk --target-platform android-arm64` → upload `AdFreeTube.apk` |
 | `macos` | macOS | `test` | `flutter build macos` → zip the `.app` → upload |
 
 ### Tests
@@ -449,10 +477,13 @@ Tests gate the builds: no APK or Mac app is produced unless they pass.
 | --- | --- | --- |
 | `test/player_state_test.dart` | Parsing the player state the page sends | `flutter test` |
 | `test/settings_test.dart` | Setting defaults (black-video workarounds on), saving, history, and the Settings screen switches | `flutter test` |
+| `test/video_hosts_test.dart` | The WebView moves between screens through a gap (bug 12) | `flutter test` |
 | `test/youtube_service_test.dart` | Finding the video id in pasted links | `flutter test` |
 | `test/page_script_contract_test.dart` | The page script still has every command the app calls, the workarounds are wired in, and Impeller stays off | `flutter test` |
 | `tool/page_script_test/test.mjs` | The injected page script in a real Chromium on `youtube_like.html` (same element ids as m.youtube.com, video through Media Source Extensions like YouTube): plays unmuted, fills the view, hides the site, reports state, canvas drawing, test square, pause/play, with the canvas on and off | `node tool/page_script_test/test.mjs` (needs Node and Playwright) |
-| `render` CI job (`tool/render_test/`) | The whole app on an Android emulator: the video really appears on screen, in both display modes | CI only (needs KVM) |
+| `test/downloads_test.dart` | yt-dlp options, progress and error parsing, the Android job format, and the Mac/desktop download queue (with a fake yt-dlp: saving, naming, errors, retry, cancel), plus real yt-dlp downloads of a local sample to MP4 and MP3 | `flutter test` (the real-yt-dlp part is skipped unless `yt-dlp` and `ffmpeg` are installed) |
+| `render` CI job (`tool/render_test/`) | The whole app on an Android emulator: the video really appears on screen, in both display modes, and keeps playing (`background.py` requires the position to advance at least 0.7 s per second) on the player, after leaving it, after Home, and with the screen off. A run with the fix switched off (`bgfix=false`) shows the bug | CI only (needs KVM) |
+| `downloads-android` CI job (`tool/download_test/`) | The app's own yt-dlp and ffmpeg download and save an MP4 and an MP3 on Android | CI only (needs KVM) |
 
 Add a test with every bug fix, so the bug can't come back unnoticed.
 
@@ -537,7 +568,9 @@ Android to install an update over an older build.
 | `AndroidManifest.xml` | `WAKE_LOCK`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MEDIA_PLAYBACK`, the `AudioService` `<service>` and `MediaButtonReceiver` `<receiver>` | Background playback and media buttons (`audio_service`) |
 | `MainActivity.kt` | `extends AudioServiceActivity` | Required by `audio_service` |
 | `AndroidManifest.xml` | `io.flutter.embedding.android.EnableImpeller` = `false` | With Flutter's Impeller renderer the WebView's video shows black (sound still plays). If a future Flutter removes this opt-out, try `io.flutter.embedding.android.ImpellerBackend` = `opengles` instead |
-| `macos/Runner/*.entitlements` | `com.apple.security.network.client` | The sandboxed Mac app can't make network requests without it |
+| `macos/Runner/*.entitlements` | `com.apple.security.network.client`, and **no** `com.apple.security.app-sandbox` | Network access; and a sandboxed app can't run the Homebrew `yt-dlp` for downloads |
+| `AndroidManifest.xml` | `FOREGROUND_SERVICE_DATA_SYNC` and the `DownloadService` `<service>` | Downloads keep running in the background |
+| `android/app/build.gradle.kts` | `minSdk` 29, `useLegacyPackaging = true`, the `youtubedl-android` dependencies | Saving to Movies/Music needs Android 10; youtubedl-android runs Python and ffmpeg from the unpacked native library folder |
 
 ---
 
@@ -650,7 +683,10 @@ word before you change or remove anything.
 | 6 | Controls act on the wrong video | The page can contain more than one `<video>` | `video()` in `_script` picks the one inside `#movie_player` |
 | 7 | Sound plays but the picture is black on Android | Under investigation; see below | See below |
 | 8 | YouTube pauses when the app goes to the background or the screen locks | The page sees `visibilitychange` / `document.hidden` and pauses | `_script` reports the page as always visible; `audio_service` keeps the app alive (`lib/playback.dart`) |
-| 9 | The video disappears from one screen when shown on another | One `WebViewController` can only be shown by one `WebViewWidget` at a time | `VideoSurface.fullscreenActive` (`lib/player_view.dart`) |
+| 9 | The video disappears from one screen when shown on another | One `WebViewController` can only be shown by one `WebViewWidget` at a time | `VideoHosts`: the newest screen that wants the video shows it (`lib/player_view.dart`) |
+| 10 | Playback stops when you press Home or the screen turns off (Android) | Android tells the WebView its window is hidden; Chromium then pauses the page's media and lowers the renderer's priority, so hiding it from the page (bug 8) isn't enough | `MainActivity.kt` keeps every WebView marked visible, resumed and at important priority while the app is in the background; the `render` CI job checks it |
+| 11 | Playback stops when you leave the player screen for search or history | A WebView that isn't on screen at all counts as hidden too | `BackgroundVideoHost` keeps the WebView attached as a 1x1 pixel view while no player screen is open (`lib/player_view.dart`) |
+| 12 | The app closes when the video moves between screens (player, fullscreen, the background view) in hybrid display mode | Android can't add the WebView to its new place while it still has its old parent | `VideoHosts` takes the WebView out first and puts it in its new place 150 ms later (`lib/player_view.dart`); `test/video_hosts_test.dart` checks it |
 
 ### Bug 7: black picture with sound on Android
 

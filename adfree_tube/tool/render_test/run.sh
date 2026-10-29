@@ -3,8 +3,8 @@
 # render-test build of the app on it, and checks that:
 #   1. the video shows (screenshot, measure.py), and
 #   2. it keeps playing on the player, after leaving the player screen,
-#      in the background (home button) and with the screen off
-#      (positions logged by the app, background.py).
+#      in the background (home button), with the screen off, and after
+#      the screen comes back on (positions logged by the app, background.py).
 # Exits non-zero (failing the build) if anything doesn't hold.
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -37,18 +37,39 @@ for attempt in 1 2; do
   adb shell am force-stop com.luong.adfree_tube
 done
 
+# What Android thinks of the app: alive, foreground service, priority
+# (oom_score_adj: 0 = on screen, 200 = foreground service, 900+ = cached and
+# about to be frozen or killed).
+state() {
+  echo "-- state ($1) --"
+  adb shell dumpsys activity services com.luong.adfree_tube | grep -E "ServiceRecord|isForeground" | head -6
+  for p in $(adb shell pidof com.luong.adfree_tube) $(adb shell pgrep -f sandboxed_process); do
+    echo "pid $p $(adb shell cat /proc/$p/cmdline | tr '\0' ' ' | cut -c1-60) adj=$(adb shell cat /proc/$p/oom_score_adj)"
+  done
+}
+
 # The app itself leaves the player screen at ~20 s and comes back at ~40 s.
 sleep 36
+state player
 mark home
 adb shell input keyevent KEYCODE_HOME
-sleep 30
+sleep 15
+state home
+sleep 15
 mark screen_off
 adb shell input keyevent KEYCODE_SLEEP
 sleep 30
-mark end
+state screen_off
+sleep 30
+mark awake
 adb shell input keyevent KEYCODE_WAKEUP
+sleep 12
+state awake
+mark end
 
-adb logcat -d | grep -E "chromium|cr_|flutter|AudioService" | tail -60
+adb logcat -d | grep -E "chromium|cr_|flutter|AudioService" | tail -40
+echo "---- system log about the app ----"
+adb logcat -d | grep -E "ActivityManager|AndroidRuntime|DEBUG|libc|Freezer|freez|adfree_tube|sandboxed_process|lowmemorykiller" | grep -v RENDER_TEST | tail -60
 adb logcat -d -v epoch | grep "RENDER_TEST" > "$here/positions.txt"
 python3 "$here/background.py" "$here/positions.txt" >> "$here/result.txt"
 background=$?
