@@ -246,7 +246,7 @@ class _VideoSurfaceState extends State<VideoSurface> {
               GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: _toggleControls,
-                onDoubleTap: () => _c.player.playOrPause(),
+                onDoubleTap: () => _c.playOrPause(),
                 onLongPress: _showDiagnostics,
               ),
               if (!const bool.fromEnvironment('PLAYER_TEST'))
@@ -321,7 +321,7 @@ class _VideoSurfaceState extends State<VideoSurface> {
                       ? Icons.pause_circle_filled
                       : Icons.play_circle_fill,
                   () {
-                    _c.player.playOrPause();
+                    _c.playOrPause();
                     _scheduleHide();
                   },
                   size: 56,

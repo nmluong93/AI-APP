@@ -76,7 +76,7 @@ class MiniPlayer extends StatelessWidget {
                           tooltip: c.state.playing ? 'Pause' : 'Play',
                           icon: Icon(
                               c.state.playing ? Icons.pause : Icons.play_arrow),
-                          onPressed: c.player.playOrPause,
+                          onPressed: c.playOrPause,
                         ),
                         IconButton(
                           tooltip: 'Close',

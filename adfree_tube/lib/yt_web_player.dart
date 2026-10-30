@@ -50,6 +50,35 @@ class YtPlayerState {
   }
 }
 
+/// Remembers where the loaded video was, so playback can pick up from there
+/// if the page loses it.
+///
+/// Workaround (bug 17 in the README "Known bugs and workarounds"): after
+/// switching away from the app and back, the page sometimes ends up with an
+/// empty player (0:00 / 0:00) that won't play.
+class ResumePoint {
+  Duration? _position;
+
+  /// Where the video was last seen playing, or null if none was loaded yet.
+  Duration? get position => _position;
+
+  /// Call with every state the page reports.
+  void observe(YtPlayerState s) {
+    if (!s.ad && s.duration > Duration.zero) _position = s.position;
+  }
+
+  /// A different video is being loaded.
+  void reset() => _position = null;
+
+  /// Whether the page has lost a video it had loaded: no length any more,
+  /// with no ad or error to explain it.
+  bool lost(YtPlayerState s) =>
+      _position != null &&
+      s.duration == Duration.zero &&
+      !s.ad &&
+      s.error == null;
+}
+
 /// Plays videos with YouTube's own mobile web player inside a WebView.
 ///
 /// Workaround (bug 3 in the README "Known bugs and workarounds"):
@@ -238,9 +267,15 @@ class YtWebPlayer extends ValueNotifier<YtPlayerState> {
   Future<void> stop() async {
     _videoId = null;
     value = const YtPlayerState();
-    await controller.loadHtmlString(
-      '<html><body style="background:#000"></body></html>',
-    );
+    // Workaround (bug 18): a WebView that stopped answering (as in bug 17)
+    // must not keep Stop from finishing, so give up on it after a moment.
+    try {
+      await controller
+          .loadHtmlString('<html><body style="background:#000"></body></html>')
+          .timeout(const Duration(seconds: 3));
+    } catch (e) {
+      debugPrint('YtWebPlayer: could not clear the page: $e');
+    }
   }
 
   static const _css = r'''
@@ -408,15 +443,23 @@ ytm-pivot-bar-renderer, .mobile-topbar-header, ytm-app-promo-renderer,
   // answered, and Chromium's video pipeline can stay out of step after
   // that, so playback stutters until the next seek. Seeking to where it
   // already is resets it, with buffered data, so it's near instant.
+  // Only on the <video> itself, and only when what's around the current
+  // spot is already buffered: going through YouTube's own seekTo here could
+  // make it reset the video (bug 17).
   api.refresh = () => {
     const el = video();
-    if (!el || el.paused || el.ended) return;
+    if (!el || el.paused || el.ended || el.readyState < 3 || !isFinite(el.duration)) return;
     const p = player();
     if (p && (p.classList.contains('ad-showing') || p.classList.contains('ad-interrupting'))) return;
+    const t = el.currentTime;
+    let buffered = false;
+    for (let i = 0; i < el.buffered.length; i++) {
+      if (el.buffered.start(i) <= t && t + 1 <= el.buffered.end(i)) buffered = true;
+    }
+    if (!buffered) return;
     refreshes++;
     lastFrameTime = -1;
-    const t = el.currentTime;
-    if (p && p.seekTo) p.seekTo(t, true); else el.currentTime = t;
+    el.currentTime = t;
   };
 
   api.testSquare = () => {

@@ -52,17 +52,61 @@ class PlaybackController extends ChangeNotifier {
     // app and back (see `api.refresh` in yt_web_player.dart), so reset the video once the
     // app is in front again and the WebView has settled.
     _lifecycle = AppLifecycleListener(
-      onHide: () => _hiddenAt = DateTime.now(),
+      onHide: () {
+        _hiddenAt = DateTime.now();
+        _playingWhenHidden = player.value.playing;
+      },
       onShow: () {
         final hiddenAt = _hiddenAt;
         _hiddenAt = null;
-        if (hiddenAt == null || !hasMedia || !player.value.playing) return;
+        if (hiddenAt == null || !hasMedia) return;
+        // Workaround (bug 17): if the page lost the video meanwhile, load it
+        // again where it was, playing if it was.
+        Future.delayed(const Duration(milliseconds: 2500), () {
+          if (_playingWhenHidden && _lost) _reload();
+        });
+        if (!player.value.playing) return;
         if (DateTime.now().difference(hiddenAt) < const Duration(seconds: 1)) {
           return;
         }
         Future.delayed(const Duration(milliseconds: 700), player.refresh);
       },
     );
+  }
+
+  bool _playingWhenHidden = false;
+  final _resume = ResumePoint();
+
+  /// Plays or pauses. If the page has lost the video (bug 17), loads it
+  /// again from where it was instead, since its player can't play.
+  Future<void> playOrPause() {
+    if (_lost) return _reload();
+    return player.playOrPause();
+  }
+
+  /// Plays, or reloads the video if the page lost it (see [playOrPause]).
+  Future<void> play() {
+    if (_lost) return _reload();
+    return player.play();
+  }
+
+  DateTime? _reloadedAt;
+
+  /// The page lost the video, and isn't already loading it again.
+  bool get _lost =>
+      hasMedia &&
+      _resume.lost(player.value) &&
+      (_reloadedAt == null ||
+          DateTime.now().difference(_reloadedAt!) > const Duration(seconds: 8));
+
+  Future<void> _reload() async {
+    final id = videoId;
+    if (id == null || id == 'render-test') return;
+    _reloadedAt = DateTime.now();
+    debugPrint('PlaybackController: page lost the video, reloading at '
+        '${_resume.position}');
+    _qualityApplied = false;
+    await player.load(id, start: _resume.position ?? Duration.zero);
   }
 
   // ignore: unused_field
@@ -93,6 +137,7 @@ class PlaybackController extends ChangeNotifier {
     related = const [];
     error = null;
     _qualityApplied = false;
+    _resume.reset();
     notifyListeners();
     await player.load(id);
     try {
@@ -117,6 +162,7 @@ class PlaybackController extends ChangeNotifier {
 
   void _onPlayerState() {
     final s = player.value;
+    _resume.observe(s);
     // Apply the preferred quality once the player reports what it has.
     if (!_qualityApplied && s.qualities.isNotEmpty && !s.ad) {
       _qualityApplied = true;
@@ -160,14 +206,17 @@ class PlaybackController extends ChangeNotifier {
   /// Stops playback completely and clears the mini player.
   Future<void> close() async {
     _loadToken++;
+    _resume.reset();
     cancelSleepTimer();
-    await player.stop();
+    // Workaround (bug 18): clear the app and the system media controls
+    // first, so Stop always works even if the page doesn't answer.
     videoId = null;
     video = null;
     related = const [];
     error = null;
     notifyListeners();
     await _handler?.clear();
+    await player.stop();
   }
 
   // ---------------------------------------------------------------------------
@@ -320,7 +369,7 @@ class _MediaHandler extends BaseAudioHandler with SeekHandler {
   }
 
   @override
-  Future<void> play() => c.player.play();
+  Future<void> play() => c.play();
 
   @override
   Future<void> pause() => c.player.pause();
@@ -330,7 +379,16 @@ class _MediaHandler extends BaseAudioHandler with SeekHandler {
 
   @override
   Future<void> stop() async {
-    await c.close();
-    await super.stop();
+    try {
+      await c.close();
+    } finally {
+      await super.stop();
+    }
   }
+
+  /// Workaround (bug 18): swiping the app away from Recents closes the
+  /// player and its notification. Otherwise the playback service (kept in
+  /// the foreground on purpose, bug 8) outlives the app.
+  @override
+  Future<void> onTaskRemoved() => stop();
 }
