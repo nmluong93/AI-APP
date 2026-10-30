@@ -108,6 +108,7 @@ class YtWebPlayer extends ValueNotifier<YtPlayerState> {
   /// Extra lines added to [diagnostics], e.g. the display mode in use.
   String Function()? diagnosticsHeader;
   String? _videoId;
+  String? _testHost;
   double _volume = 1;
 
   // A mobile browser user agent, so YouTube serves its mobile site (whose
@@ -164,7 +165,11 @@ class YtWebPlayer extends ValueNotifier<YtPlayerState> {
               host.endsWith('youtube.com') ||
               host.endsWith('google.com') ||
               host.endsWith('gstatic.com') ||
-              host.endsWith('googlevideo.com');
+              host.endsWith('googlevideo.com') ||
+              // The page the render test opened (see [loadUrl]). WebKit asks
+              // about pages the app loads itself too, so without this the
+              // macOS test page was blocked.
+              host == _testHost;
           return allowed && request.isMainFrame || !request.isMainFrame
               ? NavigationDecision.navigate
               : NavigationDecision.prevent;
@@ -206,6 +211,7 @@ class YtWebPlayer extends ValueNotifier<YtPlayerState> {
   /// Opens any page. Only used by the on-device rendering test.
   Future<void> loadUrl(String url) async {
     _videoId = 'test';
+    _testHost = Uri.parse(url).host;
     await controller.loadRequest(Uri.parse(url));
   }
 

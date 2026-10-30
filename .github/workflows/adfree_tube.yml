@@ -228,12 +228,16 @@ jobs:
           --dart-define=PLAYER_TEST_URL=http://127.0.0.1:8000/youtube_like.html
       # What ships: the canvas on. These must pass.
       - run: bash tool/render_test/run_macos.sh page-canvas http://127.0.0.1:8000/youtube_like.html true
+      # Each scenario runs even if an earlier one failed, to compare them.
       - run: bash tool/render_test/run_macos.sh page-no-canvas http://127.0.0.1:8000/youtube_like.html false
+        if: success() || failure()
       # For information: a real YouTube video, which has to be fetched after
       # each seek. YouTube can refuse CI machines, so these may not pass.
       - run: bash tool/render_test/run_macos.sh youtube-canvas https://m.youtube.com/watch?v=aqz-KE-bpKQ true
+        if: success() || failure()
         continue-on-error: true
       - run: bash tool/render_test/run_macos.sh youtube-no-canvas https://m.youtube.com/watch?v=aqz-KE-bpKQ false
+        if: success() || failure()
         continue-on-error: true
       - if: always()
         uses: actions/upload-artifact@v4
