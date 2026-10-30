@@ -50,6 +50,7 @@ Future<void> _renderTest(String url) async {
     ),
   );
   c.startRenderTest();
+  if (Platform.isMacOS) return _seekTest(c, url);
   await c.player.loadUrl(url);
   // Log where the video is every 3 seconds, whatever the app is doing.
   Timer.periodic(const Duration(seconds: 3), (_) async {
@@ -73,6 +74,85 @@ Future<void> _renderTest(String url) async {
   await Future.delayed(const Duration(seconds: 20));
   debugPrint('RENDER_TEST PHASE back_on_player');
   showSurface.value = true;
+}
+
+/// macOS part of the render test: checks that the video plays, and that it
+/// carries on playing after seeking, including a burst of seeks like the
+/// ones dragging the seek bar used to send (bug 20). Built only by the
+/// `macos-render` CI job (tool/render_test/run_macos.sh), which runs the app
+/// once per scenario and checks the readings this writes with seek_check.py.
+///
+/// The job builds the app once and picks each scenario with environment
+/// variables: PLAYER_TEST_URL (the page to play), PLAYER_CANVAS (draw the
+/// video through a canvas or not) and RENDER_TEST_LOG (where to write).
+Future<void> _seekTest(PlaybackController c, String url) async {
+  final env = Platform.environment;
+  final logFile = File(env['RENDER_TEST_LOG'] ?? 'render_test.log');
+  final started = DateTime.now();
+  void log(String line) {
+    final t = DateTime.now().difference(started).inMilliseconds / 1000;
+    final text = '${t.toStringAsFixed(2)} RENDER_TEST $line';
+    debugPrint(text);
+    logFile.writeAsStringSync('$text\n', mode: FileMode.append, flush: true);
+  }
+
+  final canvas = env['PLAYER_CANVAS'];
+  if (canvas != null) c.player.canvasVideo = canvas == 'true';
+  log(
+    'config url=${env['PLAYER_TEST_URL'] ?? url} canvas=${c.player.canvasVideo} '
+    'pageDrawn=${c.player.pageDrawnVideo}',
+  );
+  await c.player.loadUrl(env['PLAYER_TEST_URL'] ?? url);
+
+  // Where the video is every second, as the page and the app see it.
+  Timer.periodic(const Duration(seconds: 1), (_) async {
+    final s = c.state;
+    try {
+      final r = await c.player.controller
+          .runJavaScriptReturningResult(
+            "(function(){const v=document.querySelector('#movie_player video')||"
+            "document.querySelector('video');"
+            "return v?('t='+v.currentTime.toFixed(2)+' paused='+v.paused+"
+            "' ready='+v.readyState+' seeking='+v.seeking):'none'})()",
+          )
+          .timeout(const Duration(seconds: 2));
+      log(
+        'pos $r buffering=${s.buffering} ad=${s.ad} '
+        'd=${s.duration.inSeconds} err=${s.error}',
+      );
+    } catch (e) {
+      log('pos no-answer');
+    }
+  });
+
+  // Wait for the video to start (YouTube can take a while, and show an ad).
+  for (var i = 0; i < 60; i++) {
+    final s = c.state;
+    if (s.playing && !s.ad && s.position > const Duration(seconds: 1)) break;
+    await Future.delayed(const Duration(seconds: 1));
+  }
+  log('PHASE play');
+  await Future.delayed(const Duration(seconds: 10));
+
+  log('PHASE seek target=60');
+  await c.player.seek(const Duration(seconds: 60));
+  await Future.delayed(const Duration(seconds: 12));
+
+  // What dragging the seek bar used to do: a seek every 50 ms.
+  log('PHASE seek_burst target=120');
+  for (var t = 90.0; t <= 120; t += 1) {
+    await c.player.seek(Duration(milliseconds: (t * 1000).round()));
+    await Future.delayed(const Duration(milliseconds: 50));
+  }
+  await Future.delayed(const Duration(seconds: 12));
+
+  log('PHASE seek_back target=30');
+  await c.player.seek(const Duration(seconds: 30));
+  await Future.delayed(const Duration(seconds: 12));
+
+  log('debug ${await c.player.diagnostics()}'.replaceAll('\n', ' '));
+  log('PHASE end');
+  exit(0);
 }
 
 /// On-device check that downloads work: downloads [url] as a video and as

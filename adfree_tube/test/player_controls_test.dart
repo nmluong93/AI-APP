@@ -90,4 +90,40 @@ void main() {
     },
     variant: TargetPlatformVariant.only(TargetPlatform.android),
   );
+
+  // Bug 20: dragging the seek bar used to seek on every step of the drag.
+  testWidgets('dragging the seek bar seeks once, where the drag ends', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: VideoSurface())),
+    );
+    PlaybackController.instance.player.value = const YtPlayerState(
+      playing: true,
+      duration: Duration(minutes: 3),
+    );
+    await tester.pump(VideoHosts.handOffDelay);
+    FakeWebViewPlatform.scripts.clear();
+
+    final bar = find.byType(Slider);
+    final drag = await tester.startGesture(tester.getCenter(bar));
+    for (var i = 0; i < 20; i++) {
+      await drag.moveBy(const Offset(4, 0));
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    final seeks = FakeWebViewPlatform.scripts.where((s) => s.contains('seek('));
+    expect(seeks, isEmpty);
+    expect(tester.widget<Slider>(bar).value, greaterThan(90 * 1000));
+    await drag.up();
+    await tester.pump();
+    expect(seeks, hasLength(1));
+    // Where the drag ended: just past the middle of a 3 minute video.
+    final to = double.parse(
+      RegExp(r'seek\(([\d.]+)\)').firstMatch(seeks.single)!.group(1)!,
+    );
+    expect(to, inInclusiveRange(91, 150));
+
+    await tester.pump(const Duration(seconds: 4));
+    await close(tester);
+  });
 }

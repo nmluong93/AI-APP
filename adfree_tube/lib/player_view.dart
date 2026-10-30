@@ -165,6 +165,10 @@ class _VideoSurfaceState extends State<VideoSurface> {
   bool _controlsVisible = true;
   Timer? _hideTimer;
 
+  /// Where the seek bar is being dragged to, in milliseconds; null when it
+  /// isn't being dragged.
+  double? _dragMs;
+
   @override
   void initState() {
     super.initState();
@@ -369,15 +373,26 @@ class _VideoSurfaceState extends State<VideoSurface> {
             child: Row(
               children: [
                 Text(
-                  '${formatDuration(Duration(milliseconds: pos))} / ${formatDuration(s.duration)}',
+                  '${formatDuration(Duration(milliseconds: _dragMs?.round() ?? pos))} / ${formatDuration(s.duration)}',
                   style: const TextStyle(color: Colors.white, fontSize: 12),
                 ),
                 Expanded(
+                  // Workaround (bug 20): seeks only once, where the drag
+                  // ends. Seeking on every step of a drag sent the page
+                  // dozens of seeks a second, and on macOS the video could
+                  // be left loading forever.
                   child: Slider(
-                    value: pos.toDouble(),
+                    value: _dragMs ?? pos.toDouble(),
                     max: total > 0 ? total.toDouble() : 1,
                     onChanged: total > 0
                         ? (v) {
+                            setState(() => _dragMs = v);
+                            _scheduleHide();
+                          }
+                        : null,
+                    onChangeEnd: total > 0
+                        ? (v) {
+                            setState(() => _dragMs = null);
                             _c.player.seek(Duration(milliseconds: v.round()));
                             _scheduleHide();
                           }

@@ -202,7 +202,7 @@ adfree_tube/
 ├── test/                         Unit tests (`flutter test`)
 ├── third_party/youtube_explode_dart/  Patched copy of the search library (bug 13)
 ├── tool/page_script_test/       Browser test of the injected page script + YouTube-like test page
-├── tool/render_test/            Emulator video and background-playback check (`render` CI job)
+├── tool/render_test/            Emulator video and background-playback check (`render` CI job), and the Mac play-and-seek check (`macos-render`)
 ├── tool/download_test/          Sample video and the emulator download check (`downloads-android` CI job)
 ├── pubspec.yaml                  Dependencies and app version
 ├── pubspec.lock                  Exact resolved dependency versions (commit it)
@@ -486,7 +486,8 @@ Tests gate the builds: no APK or Mac app is produced unless they pass.
 | `render` | Ubuntu + Android emulator | `test` | Builds a test version of the app, runs it on an emulator against a YouTube-like page, and fails if a screenshot doesn't show the video or if it stops playing after leaving the player, pressing Home, or turning the screen off (see [Tests](#tests)) |
 | `downloads-android` | Ubuntu + Android emulator | `test` | Builds a test version that downloads `tool/download_test/sample.mp4` as MP4 and MP3 with the app's own yt-dlp, and fails unless both files land in Movies/ and Music/ and `ffprobe` finds H.264+AAC and MP3 in them |
 | `android` | Ubuntu | `test`, `render`, `downloads-android` | load signing key (if set) → `flutter build apk --target-platform android-arm64` → upload `AdFreeTube.apk` |
-| `macos` | macOS | `test` | `flutter build macos` → zip the `.app` → upload |
+| `macos-render` | macOS | `test` | Builds a test version of the Mac app and runs it against the YouTube-like page with the canvas on and off, failing unless the video plays and, after each seek (one seek, a burst of 30, a seek back), lands where it was sent and plays on. Then the same on a real YouTube video, for information only. Logs and screenshots are uploaded as *macos-render-results* |
+| `macos` | macOS | `test`, `macos-render` | `flutter build macos` → zip the `.app` → upload |
 
 ### Tests
 
@@ -495,7 +496,7 @@ Tests gate the builds: no APK or Mac app is produced unless they pass.
 | `test/player_state_test.dart` | Parsing the player state the page sends | `flutter test` |
 | `test/settings_test.dart` | Setting defaults (black-video workarounds on), saving, history, and the Settings screen switches | `flutter test` |
 | `test/video_hosts_test.dart` | The WebView moves between screens through a gap (bug 12) | `flutter test` |
-| `test/player_controls_test.dart` | On macOS the gesture layer over the video paints (so clicks reach the app, bug 19), a click brings faded controls back and moving the mouse shows them; Android keeps a gesture layer that paints nothing | `flutter test` |
+| `test/player_controls_test.dart` | On macOS the gesture layer over the video paints (so clicks reach the app, bug 19), a click brings faded controls back and moving the mouse shows them; Android keeps a gesture layer that paints nothing; dragging the seek bar seeks once, where the drag ends (bug 20) | `flutter test` |
 | `test/search_input_test.dart` | What the search bar does with what you type: about 70 cases of links (watch, youtu.be, shorts, live, embed, music, with extra parameters), bare ids, 11-letter words that aren't ids, other sites, symbols, Vietnamese text, odd spaces, blank input | `flutter test` |
 | `test/search_parsing_test.dart` | Reading YouTube's results page from a fake YouTube: ordinary results, the query sent, and every odd result we know of (streamed, premiered, scheduled, live, missing fields, unreadable results) without failing the search (bug 13) | `flutter test` |
 | `test/search_screen_test.dart` | The search screen end to end with a fake YouTube: results show, spaces tidied, blank input ignored, errors show *Try again*, which repeats the search | `flutter test` |
@@ -503,6 +504,7 @@ Tests gate the builds: no APK or Mac app is produced unless they pass.
 | `tool/page_script_test/test.mjs` | The injected page script in a real Chromium on `youtube_like.html` (same element ids as m.youtube.com, video through Media Source Extensions like YouTube): plays unmuted, fills the view, hides the site, reports state, canvas drawing, test square, pause/play, with the canvas on and off | `node tool/page_script_test/test.mjs` (needs Node and Playwright) |
 | `test/downloads_test.dart` | yt-dlp options, progress and error parsing, the Android job format, and the Mac/desktop download queue (with a fake yt-dlp: saving, naming, errors, retry, cancel), plus real yt-dlp downloads of a local sample to MP4 and MP3 | `flutter test` (the real-yt-dlp part is skipped unless `yt-dlp` and `ffmpeg` are installed) |
 | `render` CI job (`tool/render_test/`) | The whole app on an Android emulator: the video really appears on screen, in both display modes, and keeps playing (`background.py` requires the position to advance at least 0.7 s per second) on the player, after leaving it, after Home, and with the screen off. A run with the fix switched off (`bgfix=false`) shows the bug | CI only (needs KVM) |
+| `macos-render` CI job (`tool/render_test/run_macos.sh`) | The whole app on a Mac: the video plays, and after a seek, a burst of 30 seeks (what dragging the seek bar used to send) and a seek back, it lands where it was sent within 6 s and plays on at least 0.6 s per second (`seek_check.py`). Runs on the test page with the canvas on and off (must pass), and on a real YouTube video (information only) | CI only (needs a Mac runner) |
 | `downloads-android` CI job (`tool/download_test/`) | The app's own yt-dlp and ffmpeg download and save an MP4 and an MP3 on Android | CI only (needs KVM) |
 
 Add a test with every bug fix, so the bug can't come back unnoticed.
@@ -714,6 +716,7 @@ word before you change or remove anything.
 | 17 | After switching away and back, the player shows 0:00 / 0:00 and won't play (Galaxy S23) | Not certain: the page's YouTube player loses its video. The first bug 16 reset went through YouTube's own `seekTo`, which may have triggered it | `api.refresh()` now only nudges the `<video>` itself when the spot is buffered. `ResumePoint` (`lib/yt_web_player.dart`) remembers the position; if the video is lost, coming back to the app or pressing Play loads it again from there (`PlaybackController` in `lib/playback.dart`); `test/resume_point_test.dart` |
 | 18 | The media notification can't be closed, even after leaving the app | Stop waited for the page to clear before removing the notification, so a page that didn't answer blocked it; and the playback service is kept in the foreground on purpose (bug 8), so it outlived the app | Stop clears the app and the notification first and gives up on the page after 3 s; swiping the app away from Recents stops playback (`_MediaHandler.onTaskRemoved`) |
 | 19 | macOS: the progress bar and Play/Pause button disappear a few seconds into a video and never come back, so the video can't be paused | On macOS, Flutter sends a click over a platform view (the WebView) to that view unless Flutter painted something at that spot. The full-size gesture layer paints nothing, so once the controls faded out every click went to the YouTube page instead of the app | On macOS the gesture layer paints a practically invisible tint (`clickShieldColor`), and moving the mouse over the video shows the controls (`VideoSurface` in `lib/player_view.dart`); `test/player_controls_test.dart` |
+| 20 | macOS: after moving the seek bar the video keeps loading and doesn't play | Not yet certain. Dragging the seek bar sent the page a seek on every step of the drag, dozens a second, and macOS's WebKit could be left loading | The seek bar only seeks where the drag ends (`VideoSurface` in `lib/player_view.dart`; `test/player_controls_test.dart`). The `macos-render` CI job plays and seeks on a real Mac, including a burst of seeks like the old drag, with the canvas on and off, on the test page and (for information) on a real YouTube video (`_seekTest` in `lib/main.dart`, `tool/render_test/run_macos.sh`) |
 
 ### Bug 7: black picture with sound on Android
 

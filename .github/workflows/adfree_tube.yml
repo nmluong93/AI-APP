@@ -24,8 +24,11 @@ defaults:
 #              it keeps playing in the background and with the screen off
 #   downloads-android -> the app on an Android emulator downloading a video
 #              as MP4 and MP3 with its own yt-dlp and ffmpeg
-#   android -> the APK, only after all of the above pass
-#   macos   -> the Mac app, only after test passes
+#   macos-render -> the app on a Mac against the YouTube-like page, checking
+#              that the video plays and plays on after seeking (and, for
+#              information, the same on a real YouTube video)
+#   android -> the APK, only after test, render and downloads-android pass
+#   macos   -> the Mac app, only after test and macos-render pass
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -203,8 +206,44 @@ jobs:
           name: adfree-tube-android
           path: adfree_tube/build/app/outputs/flutter-apk/AdFreeTube.apk
 
-  macos:
+  macos-render:
     needs: test
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -q pillow
+      # The test page is served over plain http from the runner.
+      - run: plutil -insert NSAppTransportSecurity -json '{"NSAllowsArbitraryLoads":true}' macos/Runner/Info.plist
+      - run: flutter pub get
+      - run: >
+          flutter build macos --release
+          --dart-define=PLAYER_TEST=true
+          --dart-define=PLAYER_TEST_URL=http://127.0.0.1:8000/youtube_like.html
+      # What ships: the canvas on. These must pass.
+      - run: bash tool/render_test/run_macos.sh page-canvas http://127.0.0.1:8000/youtube_like.html true
+      - run: bash tool/render_test/run_macos.sh page-no-canvas http://127.0.0.1:8000/youtube_like.html false
+      # For information: a real YouTube video, which has to be fetched after
+      # each seek. YouTube can refuse CI machines, so these may not pass.
+      - run: bash tool/render_test/run_macos.sh youtube-canvas https://m.youtube.com/watch?v=aqz-KE-bpKQ true
+        continue-on-error: true
+      - run: bash tool/render_test/run_macos.sh youtube-no-canvas https://m.youtube.com/watch?v=aqz-KE-bpKQ false
+        continue-on-error: true
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-render-results
+          path: adfree_tube/tool/render_test/out
+          if-no-files-found: ignore
+
+  macos:
+    needs: [test, macos-render]
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4

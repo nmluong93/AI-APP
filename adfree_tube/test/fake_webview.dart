@@ -6,6 +6,9 @@ import 'package:webview_flutter_platform_interface/webview_flutter_platform_inte
 class FakeWebViewPlatform extends WebViewPlatform {
   static void install() => WebViewPlatform.instance = FakeWebViewPlatform();
 
+  /// Every script the app ran on a page, oldest first.
+  static final scripts = <String>[];
+
   @override
   PlatformWebViewController createPlatformWebViewController(
     PlatformWebViewControllerCreationParams params,
@@ -51,7 +54,8 @@ class _FakeController extends PlatformWebViewController {
   @override
   Future<void> loadHtmlString(String html, {String? baseUrl}) async {}
   @override
-  Future<void> runJavaScript(String javaScript) async {}
+  Future<void> runJavaScript(String javaScript) async =>
+      FakeWebViewPlatform.scripts.add(javaScript);
   @override
   Future<Object> runJavaScriptReturningResult(String javaScript) async => '';
 }
