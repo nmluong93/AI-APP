@@ -6,15 +6,31 @@ on:
       - 'YTDownloader/**'
       - 'YTDownloaderAndroid/**'
       - '.github/workflows/yt_downloader.yml'
+  # Every PR runs this workflow so the "YT Downloader CI passed" check, which
+  # main's ruleset requires, always reports; the changes job skips the builds
+  # when the PR doesn't touch the apps.
   pull_request:
-    paths:
-      - 'YTDownloader/**'
-      - 'YTDownloaderAndroid/**'
-      - '.github/workflows/yt_downloader.yml'
   workflow_dispatch:
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ github.event_name != 'pull_request' || steps.filter.outputs.app == 'true' }}
+    steps:
+      - if: github.event_name == 'pull_request'
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            app:
+              - 'YTDownloader/**'
+              - 'YTDownloaderAndroid/**'
+              - '.github/workflows/yt_downloader.yml'
+
   android:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -33,6 +49,8 @@ jobs:
           path: YTDownloaderAndroid/app/build/outputs/apk/debug/*.apk
 
   macos:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: macos-latest
     defaults:
       run:
@@ -40,3 +58,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: swift build -c release
+
+  # The one check main requires: fails if either build failed.
+  ci-ok:
+    name: YT Downloader CI passed
+    needs: [changes, android, macos]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: |
+          echo "A required job failed or was cancelled."
+          exit 1

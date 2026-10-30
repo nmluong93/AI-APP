@@ -5,10 +5,10 @@ on:
     paths:
       - 'adfree_tube/**'
       - '.github/workflows/adfree_tube.yml'
+  # Every PR runs this workflow so the "AdFree Tube CI passed" check, which
+  # main's ruleset requires, always reports; the changes job skips the real
+  # work when the PR doesn't touch the app.
   pull_request:
-    paths:
-      - 'adfree_tube/**'
-      - '.github/workflows/adfree_tube.yml'
   workflow_dispatch:
 
 defaults:
@@ -26,8 +26,25 @@ defaults:
 #              as MP4 and MP3 with its own yt-dlp and ffmpeg
 #   android -> the APK, only after all of the above pass
 #   macos   -> the Mac app, only after test passes
+#   ci-ok   -> the one check main requires: fails if any job above failed
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ github.event_name != 'pull_request' || steps.filter.outputs.app == 'true' }}
+    steps:
+      - if: github.event_name == 'pull_request'
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            app:
+              - 'adfree_tube/**'
+              - '.github/workflows/adfree_tube.yml'
+
   test:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -220,3 +237,15 @@ jobs:
         with:
           name: adfree-tube-macos
           path: adfree_tube/build/macos/Build/Products/Release/AdFreeTube-macos.zip
+
+  ci-ok:
+    name: AdFree Tube CI passed
+    needs: [changes, test, render, downloads-android, android, macos]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        working-directory: .
+        run: |
+          echo "A required job failed or was cancelled."
+          exit 1
