@@ -8,6 +8,49 @@ import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 import 'settings.dart';
 import 'youtube_service.dart';
 
+/// How the Home feed is ordered.
+enum FeedSort {
+  newest('Newest'),
+  mostViewed('Most viewed'),
+  shortest('Shortest'),
+  longest('Longest');
+
+  const FeedSort(this.label);
+  final String label;
+
+  static FeedSort byName(String? name) =>
+      values.firstWhere((s) => s.name == name, orElse: () => newest);
+
+  /// [videos] (newest first, as [TopicFeed.videos] has them) in this order.
+  /// Ties keep their newest-first order; live streams, which have no
+  /// length, go last when sorting by length.
+  List<FeedVideo> apply(List<FeedVideo> videos) {
+    if (this == newest) return videos;
+    final indexed = videos.indexed.toList();
+    int cmp((int, FeedVideo) a, (int, FeedVideo) b) {
+      final (ai, av) = a;
+      final (bi, bv) = b;
+      final int c;
+      switch (this) {
+        case mostViewed:
+          c = bv.views.compareTo(av.views);
+        case shortest || longest:
+          final ad = av.duration, bd = bv.duration;
+          if (ad == null || bd == null) {
+            c = ad == bd ? 0 : (ad == null ? 1 : -1);
+          } else {
+            c = this == shortest ? ad.compareTo(bd) : bd.compareTo(ad);
+          }
+        case newest:
+          c = 0;
+      }
+      return c != 0 ? c : ai.compareTo(bi);
+    }
+
+    return [for (final (_, v) in indexed..sort(cmp)) v];
+  }
+}
+
 /// One video in the Home feed. Kept small and plain so the feed can be
 /// saved and shown again on the next start before anything loads.
 class FeedVideo {
