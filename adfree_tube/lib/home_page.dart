@@ -294,29 +294,16 @@ class _HomePageState extends State<HomePage> {
         final topics = AppSettings.instance.topics;
         if (topics.isEmpty) return _noTopics();
         final topic = topics.contains(_topic) ? _topic : null;
-        final videos = _feed.videosFor(topic);
+        final sort = FeedSort.byName(AppSettings.instance.feedSort);
+        final videos = sort.apply(_feed.videosFor(topic));
         return Column(
           children: [
             SizedBox(
               height: 52,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Row(
                 children: [
-                  for (final t in <String?>[null, ...topics])
-                    Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: ChoiceChip(
-                        label: Text(t ?? 'All'),
-                        selected: t == topic,
-                        onSelected: (_) => setState(() => _topic = t),
-                      ),
-                    ),
-                  ActionChip(
-                    avatar: const Icon(Icons.edit, size: 18),
-                    label: const Text('Edit'),
-                    onPressed: _editTopics,
-                  ),
+                  Expanded(child: _topicChips(topics, topic)),
+                  _sortButton(sort),
                 ],
               ),
             ),
@@ -335,6 +322,56 @@ class _HomePageState extends State<HomePage> {
           ],
         );
       },
+    );
+  }
+
+  Widget _sortButton(FeedSort sort) {
+    return PopupMenuButton<FeedSort>(
+      tooltip: 'Sort',
+      initialValue: sort,
+      onSelected: (s) => AppSettings.instance.feedSort = s.name,
+      itemBuilder: (context) => [
+        for (final s in FeedSort.values)
+          CheckedPopupMenuItem(
+            value: s,
+            checked: s == sort,
+            child: Text(s.label),
+          ),
+      ],
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(4, 0, 12, 0),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.sort, size: 20),
+            const SizedBox(width: 4),
+            Text(sort.label, style: Theme.of(context).textTheme.labelLarge),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _topicChips(List<String> topics, String? topic) {
+    return ListView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      children: [
+        for (final t in <String?>[null, ...topics])
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: ChoiceChip(
+              label: Text(t ?? 'All'),
+              selected: t == topic,
+              onSelected: (_) => setState(() => _topic = t),
+            ),
+          ),
+        ActionChip(
+          avatar: const Icon(Icons.edit, size: 18),
+          label: const Text('Edit'),
+          onPressed: _editTopics,
+        ),
+      ],
     );
   }
 
@@ -464,7 +501,9 @@ class HistoryPage extends StatelessWidget {
                       title: e.title,
                       subtitle: e.author,
                       onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => PlayerPage(videoId: e.id)),
+                        MaterialPageRoute(
+                          builder: (_) => PlayerPage(videoId: e.id),
+                        ),
                       ),
                     );
                   },
@@ -503,8 +542,10 @@ class SettingsPage extends StatelessWidget {
             const Divider(),
             const ListTile(
               title: Text('Video display (Android)'),
-              subtitle: Text('If you hear sound but the video is black, '
-                  'try the other option.'),
+              subtitle: Text(
+                'If you hear sound but the video is black, '
+                'try the other option.',
+              ),
             ),
             RadioGroup<String>(
               groupValue: settings.videoDisplay,
@@ -512,23 +553,31 @@ class SettingsPage extends StatelessWidget {
               child: const Column(
                 children: [
                   RadioListTile<String>(
-                      value: 'hybrid', title: Text('Hybrid composition')),
+                    value: 'hybrid',
+                    title: Text('Hybrid composition'),
+                  ),
                   RadioListTile<String>(
-                      value: 'texture', title: Text('Texture')),
+                    value: 'texture',
+                    title: Text('Texture'),
+                  ),
                 ],
               ),
             ),
             SwitchListTile(
               title: const Text('Draw video through a canvas'),
-              subtitle: const Text('Copies each frame onto the page. Fixes '
-                  'black video on some phones; uses a little more battery.'),
+              subtitle: const Text(
+                'Copies each frame onto the page. Fixes '
+                'black video on some phones; uses a little more battery.',
+              ),
               value: settings.canvasVideo,
               onChanged: (v) => settings.canvasVideo = v,
             ),
             SwitchListTile(
               title: const Text('Keep video drawn in the page'),
-              subtitle: const Text('Stops Android moving the video to a '
-                  'separate layer. Try turning it off if the video is black.'),
+              subtitle: const Text(
+                'Stops Android moving the video to a '
+                'separate layer. Try turning it off if the video is black.',
+              ),
               value: settings.pageDrawnVideo,
               onChanged: (v) => settings.pageDrawnVideo = v,
             ),

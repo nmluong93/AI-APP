@@ -42,7 +42,7 @@ This README covers two kinds of readers:
 
 | Feature | Details |
 | --- | --- |
-| Latest from your topics | Home shows the newest videos for topics you pick (saved on the device), loading in the background each time the app opens; the last feed shows instantly meanwhile |
+| Latest from your topics | Home shows the newest videos for topics you pick (saved on the device), loading in the background each time the app opens; the last feed shows instantly meanwhile. Filter by topic and sort by newest, most viewed or length |
 | Search | YouTube search with infinite scroll |
 | Open by link | Paste any YouTube URL (`youtube.com/watch?v=…`, `youtu.be/…`, Shorts) or an 11-character video id |
 | No ads | Video ads are skipped the instant they start, and ad banners are hidden |
@@ -415,7 +415,10 @@ every time you open the app Home shows the newest videos for those topics,
 newest first. The feed you saw last time appears straight away and the
 fresh one loads in the background (a thin bar at the top shows it's
 refreshing), so the app stays responsive. Tap a topic chip to see only
-that topic, pull down to refresh, and use **Edit** (or the topics icon at
+that topic, use **Sort** (right of the chips) to order by *Newest*, *Most
+viewed*, *Shortest* or *Longest* (remembered between launches; it sorts the
+~20 newest videos loaded per topic, it doesn't search for the most viewed of
+all time), pull down to refresh, and use **Edit** (or the topics icon at
 the top) to change them. Coming back to the app after 30 minutes or more
 refreshes it too.
 

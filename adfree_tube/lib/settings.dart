@@ -112,6 +112,14 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// How the Home feed is sorted: a [FeedSort] name.
+  String get feedSort => _prefs.getString('feedSort') ?? 'newest';
+
+  set feedSort(String value) {
+    _prefs.setString('feedSort', value);
+    notifyListeners();
+  }
+
   /// The last topic feed, as JSON strings, so Home can show it straight
   /// away on the next start while the fresh one loads. Doesn't notify.
   List<String> get feedCache => _prefs.getStringList('feedCache') ?? const [];
