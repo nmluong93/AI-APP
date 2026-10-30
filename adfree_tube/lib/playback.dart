@@ -369,6 +369,14 @@ class _MediaHandler extends BaseAudioHandler with SeekHandler {
   }
 
   @override
+  Future<void> click([MediaButton button = MediaButton.media]) {
+    // Read by the soak test (tool/soak_test) to see which headset and
+    // lock-screen button presses reach the app.
+    debugPrint('MEDIA_BUTTON ${button.name} playing=${playbackState.value.playing}');
+    return super.click(button);
+  }
+
+  @override
   Future<void> play() => c.play();
 
   @override
