@@ -43,15 +43,18 @@ shot() {
   fi
 }
 app_pid() { adb shell pidof $pkg | tr -d '\r'; }
-# Memory of the app and its WebView renderer, in KB.
+# Memory (resident set) of the app and its WebView renderer, in KB. Read
+# from /proc rather than `dumpsys meminfo <pid>`, which asks the process to
+# dump itself: the sandboxed WebView renderer crashed on that, taking the
+# app down with it.
+rss() { adb shell cat "/proc/$1/status" 2>/dev/null | awk '/^VmRSS:/ {print $2; exit}'; }
 memory() {
-  local app web
-  app=$(adb shell dumpsys meminfo $pkg | awk '/TOTAL PSS:/ {print $3; exit} /^ *TOTAL / {print $2; exit}')
-  web=0
+  local app=0 web=0 p kb
+  for p in $(app_pid); do kb=$(rss "$p"); app=$((app + ${kb:-0})); done
   for p in $(adb shell pgrep -f sandboxed_process | tr -d '\r'); do
-    web=$((web + $(adb shell dumpsys meminfo "$p" | awk '/TOTAL PSS:/ {print $3; exit} /^ *TOTAL / {print $2; exit}' || echo 0)))
+    kb=$(rss "$p"); web=$((web + ${kb:-0}))
   done
-  echo "MEMORY $(date +%s) app=${app:-0} webview=$web" | tee -a "$out/memory.txt"
+  echo "MEMORY $(date +%s) app=$app webview=$web" | tee -a "$out/memory.txt"
 }
 foreground() { adb shell monkey -p $pkg -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; }
 
