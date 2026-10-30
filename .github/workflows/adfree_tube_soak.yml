@@ -2,9 +2,14 @@ name: AdFree Tube soak test
 
 # Longer, real-user style playback tests on an Android emulator
 # (adfree_tube/tool/soak_test): pause and resume, lock and unlock, switching
-# apps, and long playback. Run by hand from the Actions tab, and on pull
-# requests that change the soak test itself.
+# apps, and long playback. Runs every night on main (with a 30-minute long
+# play), by hand from the Actions tab, and on pull requests that change the
+# soak test itself. A failed nightly run opens a GitHub issue, or comments on
+# the one already open.
 on:
+  schedule:
+    # 19:00 UTC, 2 a.m. in Vietnam.
+    - cron: '0 19 * * *'
   workflow_dispatch:
     inputs:
       scenarios:
@@ -21,6 +26,10 @@ on:
 defaults:
   run:
     working-directory: adfree_tube
+
+permissions:
+  contents: read
+  issues: write
 
 jobs:
   soak:
@@ -65,7 +74,7 @@ jobs:
       - name: Run on emulator
         uses: reactivecircus/android-emulator-runner@v2
         env:
-          SOAK_MINUTES: ${{ inputs.minutes || '10' }}
+          SOAK_MINUTES: ${{ inputs.minutes || (github.event_name == 'schedule' && '30') || '10' }}
           SOAK_SCENARIOS: ${{ inputs.scenarios || 'pause_resume lock_unlock app_switch long' }}
         with:
           api-level: 34
@@ -79,3 +88,33 @@ jobs:
           name: soak-test-results
           path: adfree_tube/tool/soak_test/out
           if-no-files-found: ignore
+      - name: Report a failed nightly run
+        if: failure() && github.event_name == 'schedule'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            let summary = '';
+            try {
+              summary = fs.readFileSync('adfree_tube/tool/soak_test/out/summary.md', 'utf8');
+            } catch (e) {
+              summary = 'The run stopped before the checker wrote its summary; see the run log.';
+            }
+            const body = `The nightly soak test failed on \`${context.sha.slice(0, 7)}\`: ${run}\n\n${summary}`;
+            const title = 'Nightly soak test failed';
+            const { data: open } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', creator: 'github-actions[bot]', per_page: 100,
+            });
+            const existing = open.find(i => i.title === title);
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: existing.number, body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo, title, body,
+              });
+            }
