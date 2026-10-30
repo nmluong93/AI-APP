@@ -191,6 +191,10 @@ class YtWebPlayer extends ValueNotifier<YtPlayerState> {
   Future<void> play() => _cmd('play()');
   Future<void> pause() => _cmd('pause()');
   Future<void> playOrPause() => value.playing ? pause() : play();
+
+  /// Resets the page's video pipeline in place; see `api.refresh` in the
+  /// page script. Called when the app comes back to the front.
+  Future<void> refresh() => _cmd('refresh()');
   Future<void> seek(Duration to) => _cmd('seek(${to.inMilliseconds / 1000})');
   Future<void> setQuality(String quality) =>
       _cmd('setQuality(${jsonEncode(quality)})');
@@ -341,6 +345,13 @@ ytm-pivot-bar-renderer, .mobile-topbar-header, ytm-app-promo-renderer,
   // it off.
   let canvasFrames = 0;
   let lastFrameTime = -1;
+  // Frame timing, so a bug report can tell a slow page (low fps, slow
+  // canvas copies) from a struggling decoder (dropped frames) or network
+  // (waiting events, little buffered).
+  const frameTimes = [];
+  const drawTimes = [];
+  let waitingEvents = 0;
+  let refreshes = 0;
   function canvas() {
     let c = document.getElementById('__adfree_canvas');
     if (!c) {
@@ -376,14 +387,37 @@ ytm-pivot-bar-renderer, .mobile-topbar-header, ytm-app-promo-renderer,
     g.fillStyle = '#000';
     g.fillRect(0, 0, W, H);
     try {
+      const t0 = performance.now();
       g.drawImage(el, (W - w) / 2, (H - h) / 2, w, h);
+      drawTimes.push(performance.now() - t0);
+      if (drawTimes.length > 60) drawTimes.shift();
       canvasFrames++;
     } catch (e) {}
   }
-  (function loop() {
+  (function loop(now) {
+    if (now) {
+      frameTimes.push(now);
+      if (frameTimes.length > 240) frameTimes.shift();
+    }
     drawFrame();
     requestAnimationFrame(loop);
   })();
+
+  // Workaround (bug 16): back in front after the app was in the background: Android hid the
+  // WebView for a moment before the app's keep-awake workaround (bug 10)
+  // answered, and Chromium's video pipeline can stay out of step after
+  // that, so playback stutters until the next seek. Seeking to where it
+  // already is resets it, with buffered data, so it's near instant.
+  api.refresh = () => {
+    const el = video();
+    if (!el || el.paused || el.ended) return;
+    const p = player();
+    if (p && (p.classList.contains('ad-showing') || p.classList.contains('ad-interrupting'))) return;
+    refreshes++;
+    lastFrameTime = -1;
+    const t = el.currentTime;
+    if (p && p.seekTo) p.seekTo(t, true); else el.currentTime = t;
+  };
 
   api.testSquare = () => {
     const d = document.createElement('div');
@@ -399,6 +433,32 @@ ytm-pivot-bar-renderer, .mobile-topbar-header, ytm-app-promo-renderer,
     const info = {
       options: window.__adfreeOptions || null,
       canvasFrames: canvasFrames,
+      perf: (() => {
+        const now = performance.now();
+        const recent = frameTimes.filter((t) => now - t <= 2000);
+        const el = video();
+        const q = el && el.getVideoPlaybackQuality ? el.getVideoPlaybackQuality() : null;
+        let ahead = null;
+        if (el) {
+          for (let i = 0; i < el.buffered.length; i++) {
+            if (el.buffered.start(i) <= el.currentTime && el.currentTime <= el.buffered.end(i)) {
+              ahead = +(el.buffered.end(i) - el.currentTime).toFixed(1);
+            }
+          }
+        }
+        const avg = drawTimes.length ? drawTimes.reduce((a, b) => a + b, 0) / drawTimes.length : null;
+        return {
+          fps: recent.length > 1 ? +((recent.length - 1) / ((recent[recent.length - 1] - recent[0]) / 1000)).toFixed(1) : 0,
+          canvasDrawMs: avg === null ? null : +avg.toFixed(2),
+          canvasDrawMaxMs: drawTimes.length ? +Math.max(...drawTimes).toFixed(2) : null,
+          videoFrames: q ? q.totalVideoFrames : null,
+          droppedFrames: q ? q.droppedVideoFrames : null,
+          bufferedAhead: ahead,
+          waitingEvents: waitingEvents,
+          refreshes: refreshes,
+          playbackRate: el ? el.playbackRate : null,
+        };
+      })(),
       canvasCentre: (() => {
         const c = document.getElementById('__adfree_canvas');
         if (!c || !c.width) return null;
@@ -516,6 +576,10 @@ ytm-pivot-bar-renderer, .mobile-topbar-header, ytm-app-promo-renderer,
     const ad = skipAds();
     const el = video();
     if (el) keepVisible(el);
+    if (el && !el.__adfreeWaiting) {
+      el.__adfreeWaiting = true;
+      el.addEventListener('waiting', () => waitingEvents++);
+    }
     const p = player();
     let err = null;
     const errBox = document.querySelector('.ytp-error-content-wrap-reason, .ytp-error .ytp-error-content');

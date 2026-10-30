@@ -48,7 +48,26 @@ class PlaybackController extends ChangeNotifier {
       syncOptions();
       player.applyOptions();
     });
+    // Workaround (bug 16): playback stuttered after switching away from the
+    // app and back (see `api.refresh` in yt_web_player.dart), so reset the video once the
+    // app is in front again and the WebView has settled.
+    _lifecycle = AppLifecycleListener(
+      onHide: () => _hiddenAt = DateTime.now(),
+      onShow: () {
+        final hiddenAt = _hiddenAt;
+        _hiddenAt = null;
+        if (hiddenAt == null || !hasMedia || !player.value.playing) return;
+        if (DateTime.now().difference(hiddenAt) < const Duration(seconds: 1)) {
+          return;
+        }
+        Future.delayed(const Duration(milliseconds: 700), player.refresh);
+      },
+    );
   }
+
+  // ignore: unused_field
+  late final AppLifecycleListener _lifecycle;
+  DateTime? _hiddenAt;
 
   static final instance = PlaybackController._();
 
