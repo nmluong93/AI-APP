@@ -56,6 +56,12 @@ memory() {
   done
   echo "MEMORY $(date +%s) app=$app webview=$web" | tee -a "$out/memory.txt"
 }
+# Which app Android sends media buttons to, and what it thinks of ours.
+media_sessions() {
+  adb shell dumpsys media_session > "$out/media_session_$1.txt"
+  echo "-- media sessions ($1) --"
+  grep -iE "media button session|mediabuttonsession|$pkg|state=PlaybackState|active=" "$out/media_session_$1.txt" | head -20
+}
 foreground() { adb shell monkey -p $pkg -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; }
 
 pause_resume() {
@@ -66,12 +72,20 @@ pause_resume() {
     adb shell input keyevent KEYCODE_MEDIA_PLAY
     mark "play:resumed_after_${d}s"; sleep 20
   done
-  # Pause and resume from the background with the screen off, as from a
-  # headset while the phone is in a pocket.
+  # Pause and resume with the app in the background (screen on), then with
+  # the screen off, as from a headset while the phone is in a pocket.
+  adb shell input keyevent KEYCODE_HOME
+  mark "play:background_before_pause"; sleep 15
+  adb shell input keyevent KEYCODE_MEDIA_PAUSE
+  mark "pause:paused_in_background"; media_sessions in_background; sleep 30
+  adb shell input keyevent KEYCODE_MEDIA_PLAY
+  mark "play:resumed_in_background"; sleep 20
+  foreground
+  mark "play:back_after_background_pause"; sleep 10
   adb shell input keyevent KEYCODE_SLEEP
   mark "play:locked_before_pause"; sleep 20
   adb shell input keyevent KEYCODE_MEDIA_PAUSE
-  mark "pause:paused_while_locked"; sleep 60
+  mark "pause:paused_while_locked"; media_sessions while_locked; sleep 60
   adb shell input keyevent KEYCODE_MEDIA_PLAY
   mark "play:resumed_while_locked"; sleep 30
   adb shell input keyevent KEYCODE_WAKEUP
