@@ -62,6 +62,12 @@ media_sessions() {
   echo "-- media sessions ($1) --"
   grep -iE "media button session|mediabuttonsession|$pkg|state=PlaybackState|active=" "$out/media_session_$1.txt" | head -20
 }
+# The app's log of media button presses and player state since the last call.
+button_log() {
+  echo "-- media buttons and state --"
+  grep -E "MEDIA_BUTTON|MEDIA_STATE|PHASE (pause|play):" "$out/full.log" | tail -n +"$((${seen:-0} + 1))" | tail -15
+  seen=$(grep -cE "MEDIA_BUTTON|MEDIA_STATE|PHASE (pause|play):" "$out/full.log")
+}
 foreground() { adb shell monkey -p $pkg -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; }
 
 pause_resume() {
@@ -78,6 +84,7 @@ pause_resume() {
   mark "play:background_before_pause"; sleep 15
   adb shell input keyevent KEYCODE_MEDIA_PAUSE
   mark "pause:paused_in_background"; media_sessions in_background; sleep 30
+  button_log
   adb shell input keyevent KEYCODE_MEDIA_PLAY
   mark "play:resumed_in_background"; sleep 20
   foreground
@@ -86,6 +93,7 @@ pause_resume() {
   mark "play:locked_before_pause"; sleep 20
   adb shell input keyevent KEYCODE_MEDIA_PAUSE
   mark "pause:paused_while_locked"; media_sessions while_locked; sleep 60
+  button_log
   adb shell input keyevent KEYCODE_MEDIA_PLAY
   mark "play:resumed_while_locked"; sleep 30
   adb shell input keyevent KEYCODE_WAKEUP
