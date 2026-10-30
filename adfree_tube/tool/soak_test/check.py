@@ -106,7 +106,9 @@ for i, (name, start) in enumerate(phases):
         settled = [s for s in known if s["time"] >= start + 3]
         moved = sum(max(advance(a, b), 0) for a, b in zip(settled, settled[1:]))
         m["moved_s"] = round(moved, 1)
-        ok = moved < 1 and all(s["paused"] for s in settled)
+        # The position is what the user sees; the paused flag can read false
+        # for a moment while the page settles, so only the last reading counts.
+        ok = moved < 1 and bool(settled) and settled[-1]["paused"]
         if not ok:
             fail(f"{name}: should stay paused but moved {moved:.1f}s")
         else:

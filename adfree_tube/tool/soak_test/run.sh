@@ -68,6 +68,10 @@ button_log() {
   grep -E "MEDIA_BUTTON|MEDIA_STATE|PHASE (pause|play):" "$out/full.log" | tail -n +"$((${seen:-0} + 1))" | tail -15
   seen=$(grep -cE "MEDIA_BUTTON|MEDIA_STATE|PHASE (pause|play):" "$out/full.log")
 }
+# A headset button press, delivered through the media session service.
+media_key() {
+  adb shell cmd media_session dispatch "$1" || adb shell media dispatch "$1"
+}
 foreground() { adb shell monkey -p $pkg -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; }
 
 pause_resume() {
@@ -89,12 +93,16 @@ pause_resume() {
   mark "play:resumed_in_background"; sleep 20
   foreground
   mark "play:back_after_background_pause"; sleep 10
+  # With the screen off, keys injected with `input keyevent` never reached
+  # the app (no MEDIA_BUTTON in its log, though it was the media button
+  # session), so send these the way a Bluetooth headset's buttons arrive:
+  # through the media session service.
   adb shell input keyevent KEYCODE_SLEEP
   mark "play:locked_before_pause"; sleep 20
-  adb shell input keyevent KEYCODE_MEDIA_PAUSE
+  media_key pause
   mark "pause:paused_while_locked"; media_sessions while_locked; sleep 60
   button_log
-  adb shell input keyevent KEYCODE_MEDIA_PLAY
+  media_key play
   mark "play:resumed_while_locked"; sleep 30
   adb shell input keyevent KEYCODE_WAKEUP
   adb shell wm dismiss-keyguard
