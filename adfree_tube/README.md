@@ -42,6 +42,7 @@ This README covers two kinds of readers:
 
 | Feature | Details |
 | --- | --- |
+| Latest from your topics | Home shows the newest videos for topics you pick (saved on the device), loading in the background each time the app opens; the last feed shows instantly meanwhile |
 | Search | YouTube search with infinite scroll |
 | Open by link | Paste any YouTube URL (`youtube.com/watch?v=…`, `youtu.be/…`, Shorts) or an 11-character video id |
 | No ads | Video ads are skipped the instant they start, and ad banners are hidden |
@@ -171,7 +172,9 @@ The main packages used:
 adfree_tube/
 ├── lib/                          ← all the app's Dart code
 │   ├── main.dart                 App entry point: initialises libraries, sets the theme
-│   ├── home_page.dart            Search screen, History screen, Settings screen
+│   ├── home_page.dart            Home (topic feed + search), History screen, Settings screen
+│   ├── topic_feed.dart           TopicFeed: newest videos for the saved topics, cached between launches
+│   ├── topics_page.dart          "Your topics" screen: add, remove and suggested topics
 │   ├── player_page.dart          Player screen: video, quality picker, description, Up next
 │   ├── player_view.dart          VideoSurface (WebView + app controls) and fullscreen
 │   ├── yt_web_player.dart        YtWebPlayer: the YouTube page, injected CSS/JS, state
@@ -181,7 +184,7 @@ adfree_tube/
 │   │                             background handling, sleep timer, OS media controls
 │   ├── youtube_service.dart      Search, video details, related videos
 │   ├── search_input.dart         What the search bar text means: a link/id to open or words to search
-│   ├── settings.dart             Saved preferences (default quality) and watch history
+│   ├── settings.dart             Saved preferences (default quality), watch history, topics, feed cache
 │   ├── downloads/                Downloads: queue (Downloader), Android and Mac versions,
 │   │                             yt-dlp options, Downloads screen and download sheet
 │   └── widgets.dart              Shared VideoTile widget and number/duration formatting
@@ -405,9 +408,21 @@ run, and download **adfree-tube-android** (contains `AdFreeTube.apk`) or
 
 ## Using the app
 
+**Latest videos from your topics.** The first time, Home asks you to
+*Choose topics*: tap suggestions such as *Music* or *Football*, or type
+any words (a subject, a channel, a game) and press Enter. From then on,
+every time you open the app Home shows the newest videos for those topics,
+newest first. The feed you saw last time appears straight away and the
+fresh one loads in the background (a thin bar at the top shows it's
+refreshing), so the app stays responsive. Tap a topic chip to see only
+that topic, pull down to refresh, and use **Edit** (or the topics icon at
+the top) to change them. Coming back to the app after 30 minutes or more
+refreshes it too.
+
 **Find something to watch.** Type in the search bar at the top and press
 Enter. Scroll down to load more results. You can also paste a YouTube link or
-video id into the same bar, and it opens the video directly.
+video id into the same bar, and it opens the video directly. Tap **✕** in
+the bar (or Back on Android) to return to your topic feed.
 
 **The player.**
 - Tap or click the video to show or hide the controls: play/pause, back or
@@ -694,6 +709,7 @@ word before you change or remove anything.
 | 13 | Some searches fail with *"FormatException: Invalid radix-10 number … Streamed"* | youtube_explode_dart 3.1.0 can't read some dates YouTube puts on results (e.g. *"Streamed 2 weeks ago"* with a non-breaking space) or the view count of live videos, and one bad result failed the whole search | A patched copy of the package in `third_party/youtube_explode_dart` (`dependency_overrides` in `pubspec.yaml`; search for *AdFree Tube patch*): odd dates and lengths give null, and a result that still can't be read is skipped. Remove it when a fixed version is on pub.dev |
 | 14 | The app closes as soon as it opens (builds with downloads) | Flutter shrinks release builds with R8, which removed or renamed classes the yt-dlp library loads by name; and the engine only caught `Exception`, so the resulting `Error` crashed the app | Keep rules in `android/app/proguard-rules.pro`, and the download engine catches every `Throwable`, so a broken engine only disables downloads (`Engine.kt`, `DownloadQueue.kt`) |
 | 15 | Playback stops a minute after the screen goes off (Android 13+ release builds) | audio_service looks its notification icons up by name, so the release build's resource shrinker removed them; Android 13+ rejects the media controls without an icon, so the playback service never became a foreground service and Android froze the app | `android/app/src/main/res/raw/keep.xml` keeps those icons; the emulator test now reports whether the service is in the foreground |
+| 16 | Video stutters after switching away from the app and back (reported on a Galaxy S23; not yet confirmed fixed) | Not certain. Android briefly hides the WebView before the bug 10 workaround answers, and Chromium's video pipeline seems to stay out of step afterwards | When the app is back in front, `PlaybackController` calls `api.refresh()`, which seeks the video to where it already is to reset it. The player diagnostics report (long-press the video) now has a `perf` section (page fps, canvas copy time, dropped frames, buffering) to tell where any remaining lag comes from |
 
 ### Bug 7: black picture with sound on Android
 

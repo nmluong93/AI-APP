@@ -57,7 +57,8 @@ void main() {
     await tester.pumpWidget(const MaterialApp(home: HomePage()));
     await searchFor(tester, '   ');
     expect(requests, isEmpty);
-    expect(find.text('Search for something to watch.'), findsOneWidget);
+    // Still on the topic feed, which asks for topics.
+    expect(find.text('Choose topics'), findsOneWidget);
   });
 
   testWidgets('a failed search says so and Try again repeats it', (
@@ -87,6 +88,6 @@ void main() {
     fakeYouTube((_) => resultsPage([]));
     await tester.pumpWidget(const MaterialApp(home: HomePage()));
     await searchFor(tester, 'zzzzqqqq nothing');
-    expect(find.text('Search for something to watch.'), findsOneWidget);
+    expect(find.text('Nothing found. Try other words.'), findsOneWidget);
   });
 }

@@ -109,6 +109,24 @@ try {
     await page.evaluate('window.__adfree.play()');
     await page.waitForTimeout(500);
     check(`${tag}: play resumes`, await page.evaluate(() => !document.querySelector('video').paused));
+
+    const perf = JSON.parse(await page.evaluate('window.__adfree.debug()')).perf;
+    check(`${tag}: debug() reports frame timing`, perf && perf.fps > 10 && typeof perf.waitingEvents === 'number', JSON.stringify(perf));
+    if (canvasVideo) {
+      check(`${tag}: debug() times canvas copies`, perf && perf.canvasDrawMs !== null, JSON.stringify(perf));
+    }
+    // refresh() (run when the app comes back to the front) keeps playing
+    // from the same spot.
+    const t0 = await page.evaluate(() => document.querySelector('video').currentTime);
+    await page.evaluate('window.__adfree.refresh()');
+    await page.waitForTimeout(500);
+    const t1 = await page.evaluate(() => document.querySelector('video').currentTime);
+    check(`${tag}: refresh keeps playing from the same spot`,
+      t1 >= t0 && t1 - t0 < 2 && await page.evaluate(() => !document.querySelector('video').paused), `${t0} -> ${t1}`);
+    await page.evaluate('window.__adfree.pause()');
+    await page.evaluate('window.__adfree.refresh()');
+    const refreshes = JSON.parse(await page.evaluate('window.__adfree.debug()')).perf.refreshes;
+    check(`${tag}: refresh leaves a paused video alone`, refreshes === 1, `refreshes=${refreshes}`);
     await page.close();
   }
 } finally {

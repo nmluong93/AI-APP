@@ -24,6 +24,14 @@ class YoutubeService {
 
   Future<VideoSearchList> search(String query) => _yt.search.search(query);
 
+  /// YouTube's search filter for videos only, newest first: protobuf
+  /// {1: 2 (sort by upload date), 2: {2: 1 (type video)}}, base64.
+  static const newestVideos = SearchFilter('CAISAhAB');
+
+  /// The newest videos about [topic], for the Home feed.
+  Future<VideoSearchList> latest(String topic) =>
+      _yt.search.search(topic, filter: newestVideos);
+
   Future<Video> getVideo(String id) => _yt.videos.get(id);
 
   Future<List<Video>> related(Video video) async {

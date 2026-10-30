@@ -18,7 +18,8 @@ class HistoryEntry {
       HistoryEntry(j['id'] as String, j['title'] as String, j['author'] as String);
 }
 
-/// Preferred quality and watch history, persisted locally.
+/// Preferred quality, watch history, topics of interest and the last
+/// topic feed, persisted locally.
 class AppSettings extends ChangeNotifier {
   AppSettings._(this._prefs);
 
@@ -85,4 +86,35 @@ class AppSettings extends ChangeNotifier {
     _prefs.remove('history');
     notifyListeners();
   }
+
+  /// Topics the user is interested in; Home shows their latest videos.
+  List<String> get topics => _prefs.getStringList('topics') ?? const [];
+
+  static const maxTopics = 20;
+
+  /// Adds [topic] (spaces tidied) unless it's blank, already there in any
+  /// letter case, or the list is full. Returns whether it was added.
+  bool addTopic(String topic) {
+    final t = topic.trim().replaceAll(RegExp(r'\s+'), ' ');
+    final current = topics;
+    if (t.isEmpty ||
+        current.length >= maxTopics ||
+        current.any((e) => e.toLowerCase() == t.toLowerCase())) {
+      return false;
+    }
+    _prefs.setStringList('topics', [...current, t]);
+    notifyListeners();
+    return true;
+  }
+
+  void removeTopic(String topic) {
+    _prefs.setStringList('topics', topics.where((e) => e != topic).toList());
+    notifyListeners();
+  }
+
+  /// The last topic feed, as JSON strings, so Home can show it straight
+  /// away on the next start while the fresh one loads. Doesn't notify.
+  List<String> get feedCache => _prefs.getStringList('feedCache') ?? const [];
+
+  set feedCache(List<String> value) => _prefs.setStringList('feedCache', value);
 }
