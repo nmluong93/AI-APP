@@ -204,6 +204,7 @@ adfree_tube/
 ├── tool/page_script_test/       Browser test of the injected page script + YouTube-like test page
 ├── tool/render_test/            Emulator video and background-playback check (`render` CI job)
 ├── tool/download_test/          Sample video and the emulator download check (`downloads-android` CI job)
+├── tool/soak_test/              Longer real-user playback scenarios on the emulator (soak workflow)
 ├── pubspec.yaml                  Dependencies and app version
 ├── pubspec.lock                  Exact resolved dependency versions (commit it)
 └── analysis_options.yaml         Lint rules used by `flutter analyze`
@@ -506,6 +507,7 @@ Tests gate the builds: no APK or Mac app is produced unless they pass.
 | `test/downloads_test.dart` | yt-dlp options, progress and error parsing, the Android job format, and the Mac/desktop download queue (with a fake yt-dlp: saving, naming, errors, retry, cancel), plus real yt-dlp downloads of a local sample to MP4 and MP3 | `flutter test` (the real-yt-dlp part is skipped unless `yt-dlp` and `ffmpeg` are installed) |
 | `render` CI job (`tool/render_test/`) | The whole app on an Android emulator: the video really appears on screen, in both display modes, and keeps playing (`background.py` requires the position to advance at least 0.7 s per second) on the player, after leaving it, after Home, and with the screen off. A run with the fix switched off (`bgfix=false`) shows the bug | CI only (needs KVM) |
 | `downloads-android` CI job (`tool/download_test/`) | The app's own yt-dlp and ffmpeg download and save an MP4 and an MP3 on Android | CI only (needs KVM) |
+| Soak workflow (`adfree_tube_soak.yml`, `tool/soak_test/`) | Real-user sessions on an Android emulator: pause and resume from the headset/notification controls (10 s, 1 min, 5 min, and while locked), lock and unlock (1 and 5 min), switching to Settings, Home and Recents and back 8 times, and a long play (10 min by default). `check.py` fails a run if the video doesn't keep up (75% of real time), stalls over 6 s, takes over 5 s to resume, moves while paused, shows a black frame after unlocking or coming back, or the app crashes or restarts. It also reports dropped frames and memory. The job summary has a table of every phase; logs, screenshots and `metrics.json` are in the `soak-test-results` artifact | Actions tab > **AdFree Tube soak test** > Run workflow (CI only, needs KVM) |
 
 Add a test with every bug fix, so the bug can't come back unnoticed.
 
