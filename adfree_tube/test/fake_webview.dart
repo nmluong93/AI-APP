@@ -1,5 +1,4 @@
-import 'dart:ui';
-
+import 'package:flutter/widgets.dart';
 import 'package:webview_flutter_platform_interface/webview_flutter_platform_interface.dart';
 
 /// Stands in for the real WebView so screens that create the player can be
@@ -16,6 +15,18 @@ class FakeWebViewPlatform extends WebViewPlatform {
   PlatformNavigationDelegate createPlatformNavigationDelegate(
     PlatformNavigationDelegateCreationParams params,
   ) => _FakeNavigationDelegate(params);
+
+  @override
+  PlatformWebViewWidget createPlatformWebViewWidget(
+    PlatformWebViewWidgetCreationParams params,
+  ) => _FakeWidget(params);
+}
+
+class _FakeWidget extends PlatformWebViewWidget {
+  _FakeWidget(super.params) : super.implementation();
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.expand();
 }
 
 class _FakeController extends PlatformWebViewController {
