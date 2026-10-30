@@ -103,14 +103,17 @@ for i, (name, start) in enumerate(phases):
                 warnings.append(f"{name}: dropped {dropped:.0f} of {total:.0f} frames")
 
     if kind == "pause":
-        settled = [s for s in known if s["time"] >= start + 3]
+        # Leave out the last 2 s: run.sh presses play just before it marks
+        # the next phase, so a reading there can already be playing.
+        settled = [s for s in known if start + 3 <= s["time"] <= end - 2]
         moved = sum(max(advance(a, b), 0) for a, b in zip(settled, settled[1:]))
         m["moved_s"] = round(moved, 1)
         # The position is what the user sees; the paused flag can read false
         # for a moment while the page settles, so only the last reading counts.
         ok = moved < 1 and bool(settled) and settled[-1]["paused"]
         if not ok:
-            fail(f"{name}: should stay paused but moved {moved:.1f}s")
+            why = f"moved {moved:.1f}s" if moved >= 1 else "the video did not report paused"
+            fail(f"{name}: should stay paused but {why}")
         else:
             results.append(f"PASS {name}: stayed paused")
         continue
