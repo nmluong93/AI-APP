@@ -158,8 +158,9 @@ class VideoSurface extends StatefulWidget {
 @visibleForTesting
 const clickShieldColor = Color(0x01000000);
 
-/// The seek bar and Play/Pause button of the (not full screen) player, so the
-/// macOS user test (`_seekTest` in lib/main.dart) can find them on screen.
+/// The seek bar and Play/Pause button of the (not full screen) player in test
+/// builds, so the macOS user test (`_seekTest` in lib/main.dart) can find
+/// them on screen.
 final seekBarKey = GlobalKey(debugLabel: 'seekBar');
 final playButtonKey = GlobalKey(debugLabel: 'playButton');
 
@@ -171,6 +172,11 @@ class _VideoSurfaceState extends State<VideoSurface> {
   static final _showOverlay =
       !const bool.fromEnvironment('PLAYER_TEST') ||
       Platform.environment['PLAYER_TEST_USER'] == '1';
+
+  /// Only test builds tag the controls: when a player page replaces another,
+  /// both are on screen for a moment, and two widgets can't share a key.
+  bool get _testKeys =>
+      const bool.fromEnvironment('PLAYER_TEST') && !widget.fullscreen;
 
   /// On a Mac the mouse, not touch, drives the controls.
   bool get _desktop => defaultTargetPlatform == TargetPlatform.macOS;
@@ -369,7 +375,7 @@ class _VideoSurfaceState extends State<VideoSurface> {
                     _scheduleHide();
                   },
                   size: 56,
-                  key: widget.fullscreen ? null : playButtonKey,
+                  key: _testKeys ? playButtonKey : null,
                 ),
                 const SizedBox(width: 24),
                 _iconButton(Icons.forward_10, () {
@@ -395,7 +401,7 @@ class _VideoSurfaceState extends State<VideoSurface> {
                   // dozens of seeks a second, and on macOS the video could
                   // be left loading forever.
                   child: Slider(
-                    key: widget.fullscreen ? null : seekBarKey,
+                    key: _testKeys ? seekBarKey : null,
                     value: _dragMs ?? pos.toDouble(),
                     max: total > 0 ? total.toDouble() : 1,
                     onChanged: total > 0
