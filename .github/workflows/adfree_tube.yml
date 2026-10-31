@@ -280,10 +280,17 @@ jobs:
       - run: |
           cd build/macos/Build/Products/Release
           ditto -c -k --keepParent "AdFree Tube.app" AdFreeTube-macos.zip
+          # A disk image too: open it and drag the app to Applications.
+          mkdir dmg && cp -R "AdFree Tube.app" dmg/ && ln -s /Applications dmg/Applications
+          hdiutil create -volname "AdFree Tube" -srcfolder dmg -ov -format UDZO AdFreeTube-macos.dmg
       - uses: actions/upload-artifact@v4
         with:
           name: adfree-tube-macos
           path: adfree_tube/build/macos/Build/Products/Release/AdFreeTube-macos.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: adfree-tube-macos-dmg
+          path: adfree_tube/build/macos/Build/Products/Release/AdFreeTube-macos.dmg
 
   ci-ok:
     name: AdFree Tube CI passed

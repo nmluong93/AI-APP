@@ -403,7 +403,9 @@ Every push that changes `adfree_tube/` triggers the
 [CI workflow](#continuous-integration-github-actions), which builds both
 apps. Open the repo's **Actions** tab, click the latest **AdFree Tube build**
 run, and download **adfree-tube-android** (contains `AdFreeTube.apk`) or
-**adfree-tube-macos** from the *Artifacts* section at the bottom.
+**adfree-tube-macos** (the `.app`, zipped) or **adfree-tube-macos-dmg** (a
+disk image: open it and drag the app to Applications) from the *Artifacts*
+section at the bottom.
 
 ---
 
@@ -491,7 +493,7 @@ Tests gate the builds: no APK or Mac app is produced unless they pass.
 | `downloads-android` | Ubuntu + Android emulator | `test` | Builds a test version that downloads `tool/download_test/sample.mp4` as MP4 and MP3 with the app's own yt-dlp, and fails unless both files land in Movies/ and Music/ and `ffprobe` finds H.264+AAC and MP3 in them |
 | `android` | Ubuntu | `test`, `render`, `downloads-android` | load signing key (if set) → `flutter build apk --target-platform android-arm64` → upload `AdFreeTube.apk` |
 | `macos-render` | macOS | `test` | Builds a test version of the Mac app and runs it against the YouTube-like page with the canvas on and off, failing unless the video plays and, after each seek (one seek, a burst of 30, a seek back), lands where it was sent and plays on. Then once more as a user: the real mouse pauses, clicks and drags the seek bar, and plays again. Then the same on a real YouTube video, for information only. Logs and screenshots are uploaded as *macos-render-results* |
-| `macos` | macOS | `test`, `macos-render` | `flutter build macos` → zip the `.app` → upload |
+| `macos` | macOS | `test`, `macos-render` | `flutter build macos` → zip the `.app` and make a `.dmg` → upload both |
 
 ### Tests
 
