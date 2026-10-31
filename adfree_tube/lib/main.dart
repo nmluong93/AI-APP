@@ -246,7 +246,7 @@ Future<void> _macSoakTest(PlaybackController c, String url) async {
           .timeout(const Duration(seconds: 2));
       log('pos $r');
     } catch (e) {
-      log('pos no-answer');
+      log('pos no-answer $e'.replaceAll('\n', ' '));
     }
   });
 

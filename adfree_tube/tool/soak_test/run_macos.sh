@@ -175,4 +175,8 @@ grep -E "Unhandled Exception|Fatal error" "$out/app.log" > "$out/problems.log"
 echo "---- media commands ----"; cat "$out/media.txt" 2>/dev/null
 echo "---- screenshots (information only) ----"; cat "$out/shots_info.txt" 2>/dev/null
 echo "---- end of the app's output ----"; tail -30 "$out/app.log"
+# What the app logged, grouped: the first readings, then how many of each kind.
+echo "---- first readings ----"; grep "RENDER_TEST pos" "$log" | head -5
+echo "---- readings by kind ----"
+grep -o "RENDER_TEST pos [a-z=-]*" "$log" | sort | uniq -c
 SOAK_PLATFORM=macOS python3 "$here/check.py" "$out"
