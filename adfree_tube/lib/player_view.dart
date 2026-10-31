@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -165,6 +166,12 @@ final playButtonKey = GlobalKey(debugLabel: 'playButton');
 class _VideoSurfaceState extends State<VideoSurface> {
   final _c = PlaybackController.instance;
 
+  /// The controls are left out of render-test builds, except for the macOS
+  /// user test, which clicks them (PLAYER_TEST_USER, `_seekTest`).
+  static final _showOverlay =
+      !const bool.fromEnvironment('PLAYER_TEST') ||
+      Platform.environment['PLAYER_TEST_USER'] == '1';
+
   /// On a Mac the mouse, not touch, drives the controls.
   bool get _desktop => defaultTargetPlatform == TargetPlatform.macOS;
   bool _controlsVisible = true;
@@ -286,7 +293,7 @@ class _VideoSurfaceState extends State<VideoSurface> {
                       : null,
                 ),
               ),
-              if (!const bool.fromEnvironment('PLAYER_TEST'))
+              if (_showOverlay)
                 ValueListenableBuilder<YtPlayerState>(
                   valueListenable: _c.player,
                   builder: (context, s, _) => _overlay(context, s),
