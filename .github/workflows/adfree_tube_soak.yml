@@ -1,14 +1,19 @@
 name: AdFree Tube soak test
 
-# Longer, real-user style playback tests on an Android emulator
-# (adfree_tube/tool/soak_test): pause and resume, lock and unlock, switching
-# apps, and long playback. Run by hand from the Actions tab, and on pull
-# requests that change the soak test itself.
+# Longer, real-user style playback tests (adfree_tube/tool/soak_test) on an
+# Android emulator and on a Mac: pause and resume, lock and unlock (the
+# display off on the Mac), switching apps, and long playback. Runs every
+# night on main (with a 30-minute long play), by hand from the Actions tab,
+# and on pull requests that change the soak test itself. A failed nightly
+# run opens a GitHub issue, or comments on the one already open.
 on:
+  schedule:
+    # 19:00 UTC, 2 a.m. in Vietnam.
+    - cron: '0 19 * * *'
   workflow_dispatch:
     inputs:
       scenarios:
-        description: 'Scenarios to run (space separated): pause_resume lock_unlock app_switch long'
+        description: 'Scenarios to run on both platforms (space separated): pause_resume lock_unlock app_switch long'
         default: 'pause_resume lock_unlock app_switch long'
       minutes:
         description: 'How long the long scenario plays, in minutes'
@@ -18,12 +23,21 @@ on:
       - 'adfree_tube/tool/soak_test/**'
       - '.github/workflows/adfree_tube_soak.yml'
 
+env:
+  SOAK_MINUTES: ${{ inputs.minutes || (github.event_name == 'schedule' && '30') || '10' }}
+  SOAK_SCENARIOS: ${{ inputs.scenarios || 'pause_resume lock_unlock app_switch long' }}
+
 defaults:
   run:
     working-directory: adfree_tube
 
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   soak:
+    name: soak (Android)
     runs-on: ubuntu-latest
     timeout-minutes: 150
     steps:
@@ -64,9 +78,6 @@ jobs:
       - run: cd android && ./gradlew --stop
       - name: Run on emulator
         uses: reactivecircus/android-emulator-runner@v2
-        env:
-          SOAK_MINUTES: ${{ inputs.minutes || '10' }}
-          SOAK_SCENARIOS: ${{ inputs.scenarios || 'pause_resume lock_unlock app_switch long' }}
         with:
           api-level: 34
           target: google_apis
@@ -79,3 +90,77 @@ jobs:
           name: soak-test-results
           path: adfree_tube/tool/soak_test/out
           if-no-files-found: ignore
+
+  soak-macos:
+    name: soak (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -q pillow
+      # The test page is served over plain http from the runner.
+      - run: plutil -insert NSAppTransportSecurity -json '{"NSAllowsArbitraryLoads":true}' macos/Runner/Info.plist
+      - run: flutter pub get
+      - run: flutter build macos --release --dart-define=PLAYER_TEST=true --dart-define=PLAYER_TEST_URL=http://127.0.0.1:8000/youtube_like.html
+      - run: bash tool/soak_test/run_macos.sh $SOAK_SCENARIOS
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: soak-test-results-macos
+          path: adfree_tube/tool/soak_test/out
+          if-no-files-found: ignore
+
+  report:
+    needs: [soak, soak-macos]
+    if: always() && github.event_name == 'schedule' && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: results
+      - name: Open or update the failure issue
+        uses: actions/github-script@v7
+        env:
+          ANDROID: ${{ needs.soak.result }}
+          MACOS: ${{ needs.soak-macos.result }}
+        with:
+          script: |
+            const fs = require('fs');
+            const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const part = (platform, result, dir) => {
+              if (result === 'success') return `### ${platform}: passed`;
+              let summary;
+              try {
+                summary = fs.readFileSync(`results/${dir}/summary.md`, 'utf8');
+              } catch (e) {
+                summary = 'The run stopped before the checker wrote its summary; see the run log.';
+              }
+              return `### ${platform}: ${result}\n\n${summary}`;
+            };
+            const body = [
+              `The nightly soak test failed on \`${context.sha.slice(0, 7)}\`: ${run}`,
+              part('Android', process.env.ANDROID, 'soak-test-results'),
+              part('macOS', process.env.MACOS, 'soak-test-results-macos'),
+            ].join('\n\n');
+            const title = 'Nightly soak test failed';
+            const { data: open } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', creator: 'github-actions[bot]', per_page: 100,
+            });
+            const existing = open.find(i => i.title === title);
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: existing.number, body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo, title, body,
+              });
+            }

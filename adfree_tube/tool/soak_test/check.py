@@ -185,7 +185,8 @@ lines = results + ["WARN " + w for w in warnings] + [f"SOAK_TEST verdict: {verdi
 open(os.path.join(out, "results.txt"), "w").write("\n".join(lines) + "\n")
 json.dump(metrics, open(os.path.join(out, "metrics.json"), "w"), indent=2)
 
-md = [f"## Soak test: {verdict}", "",
+platform = os.environ.get("SOAK_PLATFORM")
+md = [f"## Soak test{f' ({platform})' if platform else ''}: {verdict}", "",
       "| Phase | Result | Played | Longest stall | Resume | Dropped frames |",
       "|---|---|---|---|---|---|"]
 failed_phases = {f.split(": ")[0] for f in failures}

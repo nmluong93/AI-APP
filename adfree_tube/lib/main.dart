@@ -29,6 +29,10 @@ Future<void> main() async {
 /// screen off, then checks the positions this logs.
 Future<void> _renderTest(String url) async {
   final c = PlaybackController.instance;
+  // The macOS soak test drives the app from outside (see _macSoakTest).
+  if (Platform.isMacOS && Platform.environment['SOAK_TEST_LOG'] != null) {
+    return _macSoakTest(c, url);
+  }
   if (Platform.isAndroid &&
       !const bool.fromEnvironment('PLAYER_BG_FIX', defaultValue: true)) {
     await const MethodChannel('adfree_tube/background')
@@ -59,13 +63,7 @@ Future<void> _renderTest(String url) async {
   Timer.periodic(const Duration(milliseconds: logMs), (_) async {
     try {
       final r = await c.player.controller
-          .runJavaScriptReturningResult(
-            "(function(){const v=document.querySelector('video');if(!v)return 'none';"
-            "const q=v.getVideoPlaybackQuality?v.getVideoPlaybackQuality():null;"
-            "return 't='+v.currentTime.toFixed(2)+' paused='+v.paused+"
-            "' d='+(v.duration||0).toFixed(2)+' rs='+v.readyState+"
-            "(q?' frames='+q.totalVideoFrames+' dropped='+q.droppedVideoFrames:'')})()",
-          )
+          .runJavaScriptReturningResult(_positionScript)
           .timeout(const Duration(seconds: 2));
       debugPrint('RENDER_TEST pos $r');
     } catch (e) {
@@ -196,6 +194,76 @@ String _uiLayout() {
   final size = view.physicalSize / view.devicePixelRatio;
   return 'seek=${rect(seekBarKey)} play=${rect(playButtonKey)} '
       'view=${size.width.toStringAsFixed(1)},${size.height.toStringAsFixed(1)}';
+}
+
+/// Where the page's video is, as the render and soak tests log it.
+const _positionScript =
+    "(function(){const v=document.querySelector('video');if(!v)return 'none';"
+    "const q=v.getVideoPlaybackQuality?v.getVideoPlaybackQuality():null;"
+    "return 't='+v.currentTime.toFixed(2)+' paused='+v.paused+"
+    "' d='+(v.duration||0).toFixed(2)+' rs='+v.readyState+"
+    "(q?' frames='+q.totalVideoFrames+' dropped='+q.droppedVideoFrames:'')})()";
+
+/// macOS part of the soak test (tool/soak_test/run_macos.sh). Plays
+/// PLAYER_TEST_URL and appends where the video is, every second, to the file
+/// SOAK_TEST_LOG, in the format tool/soak_test/check.py reads. The script
+/// adds its phase marks to the same file while it pauses and resumes from
+/// the system media controls, hides the app, switches apps and turns the
+/// display off.
+///
+/// If a system media command doesn't reach the app, the script writes
+/// "play" or "pause" as a new line of SOAK_TEST_CMD instead, and this calls
+/// what the media handler would have (PlaybackController.play, or pause on
+/// the player).
+Future<void> _macSoakTest(PlaybackController c, String url) async {
+  final env = Platform.environment;
+  final logFile = File(env['SOAK_TEST_LOG']!);
+  void log(String line) {
+    final t = DateTime.now().millisecondsSinceEpoch / 1000;
+    logFile.writeAsStringSync(
+      '${t.toStringAsFixed(3)} RENDER_TEST $line\n',
+      mode: FileMode.append,
+      flush: true,
+    );
+  }
+
+  runApp(
+    MaterialApp(
+      debugShowCheckedModeBanner: false,
+      builder: (context, child) => BackgroundVideoHost(child: child!),
+      home: const Scaffold(
+        backgroundColor: Colors.black,
+        body: VideoSurface(),
+      ),
+    ),
+  );
+  c.startRenderTest();
+  await c.player.loadUrl(env['PLAYER_TEST_URL'] ?? url);
+  Timer.periodic(const Duration(seconds: 1), (_) async {
+    try {
+      final r = await c.player.controller
+          .runJavaScriptReturningResult(_positionScript)
+          .timeout(const Duration(seconds: 2));
+      log('pos $r');
+    } catch (e) {
+      log('pos no-answer $e'.replaceAll('\n', ' '));
+    }
+  });
+
+  final commands = env['SOAK_TEST_CMD'];
+  if (commands == null) return;
+  var done = 0;
+  Timer.periodic(const Duration(milliseconds: 500), (_) {
+    final f = File(commands);
+    if (!f.existsSync()) return;
+    final lines = f.readAsLinesSync();
+    for (final cmd in lines.skip(done)) {
+      debugPrint('SOAK_TEST command $cmd');
+      if (cmd == 'play') c.play();
+      if (cmd == 'pause') c.player.pause();
+    }
+    done = lines.length;
+  });
 }
 
 /// On-device check that downloads work: downloads [url] as a video and as
