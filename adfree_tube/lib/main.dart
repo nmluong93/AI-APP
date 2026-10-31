@@ -91,10 +91,18 @@ Future<void> _renderTest(String url) async {
 /// The job builds the app once and picks each scenario with environment
 /// variables: PLAYER_TEST_URL (the page to play), PLAYER_CANVAS (draw the
 /// video through a canvas or not) and RENDER_TEST_LOG (where to write).
+///
+/// With PLAYER_TEST_USER=1 the app doesn't seek by itself: it logs where the
+/// seek bar and Play/Pause button are, and tool/render_test/user_drive.py
+/// moves and clicks the real mouse, as a user would, and logs the phases in
+/// the same file. Times are then seconds since 1970, so both line up.
 Future<void> _seekTest(PlaybackController c, String url) async {
   final env = Platform.environment;
   final logFile = File(env['RENDER_TEST_LOG'] ?? 'render_test.log');
-  final started = DateTime.now();
+  final user = env['PLAYER_TEST_USER'] == '1';
+  final started = user
+      ? DateTime.fromMillisecondsSinceEpoch(0)
+      : DateTime.now();
   void log(String line) {
     final t = DateTime.now().difference(started).inMilliseconds / 1000;
     final text = '${t.toStringAsFixed(2)} RENDER_TEST $line';
@@ -129,6 +137,7 @@ Future<void> _seekTest(PlaybackController c, String url) async {
     } catch (e) {
       log('pos no-answer');
     }
+    if (user) log('ui ${_uiLayout()}');
   });
 
   // Wait for the video to start (YouTube can take a while, and show an ad).
@@ -138,6 +147,12 @@ Future<void> _seekTest(PlaybackController c, String url) async {
     await Future.delayed(const Duration(seconds: 1));
   }
   log('PHASE play');
+  if (user) {
+    // user_drive.py does the rest, and stops the app when it is done.
+    await Future.delayed(const Duration(minutes: 4));
+    log('debug ${await c.player.diagnostics()}'.replaceAll('\n', ' '));
+    exit(0);
+  }
   await Future.delayed(const Duration(seconds: 10));
 
   log('PHASE seek target=60');
@@ -159,6 +174,28 @@ Future<void> _seekTest(PlaybackController c, String url) async {
   log('debug ${await c.player.diagnostics()}'.replaceAll('\n', ' '));
   log('PHASE end');
   exit(0);
+}
+
+/// Where the seek bar and Play/Pause button are, in points from the top left
+/// of the window's content, and the content's size: `seek=x,y,w,h
+/// play=x,y,w,h view=w,h` (`none` for a control not on screen).
+String _uiLayout() {
+  String rect(GlobalKey key) {
+    final box = key.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize || !box.attached) return 'none';
+    final o = box.localToGlobal(Offset.zero);
+    return [
+      o.dx,
+      o.dy,
+      box.size.width,
+      box.size.height,
+    ].map((v) => v.toStringAsFixed(1)).join(',');
+  }
+
+  final view = WidgetsBinding.instance.platformDispatcher.views.first;
+  final size = view.physicalSize / view.devicePixelRatio;
+  return 'seek=${rect(seekBarKey)} play=${rect(playButtonKey)} '
+      'view=${size.width.toStringAsFixed(1)},${size.height.toStringAsFixed(1)}';
 }
 
 /// On-device check that downloads work: downloads [url] as a video and as

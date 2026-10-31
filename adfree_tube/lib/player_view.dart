@@ -157,6 +157,11 @@ class VideoSurface extends StatefulWidget {
 @visibleForTesting
 const clickShieldColor = Color(0x01000000);
 
+/// The seek bar and Play/Pause button of the (not full screen) player, so the
+/// macOS user test (`_seekTest` in lib/main.dart) can find them on screen.
+final seekBarKey = GlobalKey(debugLabel: 'seekBar');
+final playButtonKey = GlobalKey(debugLabel: 'playButton');
+
 class _VideoSurfaceState extends State<VideoSurface> {
   final _c = PlaybackController.instance;
 
@@ -357,6 +362,7 @@ class _VideoSurfaceState extends State<VideoSurface> {
                     _scheduleHide();
                   },
                   size: 56,
+                  key: widget.fullscreen ? null : playButtonKey,
                 ),
                 const SizedBox(width: 24),
                 _iconButton(Icons.forward_10, () {
@@ -382,6 +388,7 @@ class _VideoSurfaceState extends State<VideoSurface> {
                   // dozens of seeks a second, and on macOS the video could
                   // be left loading forever.
                   child: Slider(
+                    key: widget.fullscreen ? null : seekBarKey,
                     value: _dragMs ?? pos.toDouble(),
                     max: total > 0 ? total.toDouble() : 1,
                     onChanged: total > 0
@@ -417,8 +424,10 @@ class _VideoSurfaceState extends State<VideoSurface> {
     IconData icon,
     VoidCallback onPressed, {
     double size = 28,
+    Key? key,
   }) {
     return IconButton(
+      key: key,
       iconSize: size,
       color: Colors.white,
       icon: Icon(icon),

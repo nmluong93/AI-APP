@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# Runs on the CI Mac. Usage: run_macos.sh <name> <url> <canvas true|false>
+# Runs on the CI Mac. Usage: run_macos.sh <name> <url> <canvas true|false> [user]
 # Starts the render-test build of the app on <url> (the YouTube-like test
 # page or a real YouTube video), lets it play and seek (`_seekTest` in
 # lib/main.dart), takes a screenshot while it plays, and checks the logged
 # positions with seek_check.py. Exits non-zero if seeking or playback fails.
+# With "user", the app doesn't seek by itself: user_drive.py moves and clicks
+# the real mouse on its controls instead, like a person would.
 set -u
-name=$1 url=$2 canvas=$3
+name=$1 url=$2 canvas=$3 mode=${4:-}
 here="$(cd "$(dirname "$0")" && pwd)"
 out="$here/out/$name"
 mkdir -p "$out"
@@ -15,8 +17,13 @@ server=$!
 trap 'kill $server ${pid:-} 2>/dev/null' EXIT
 sleep 1
 
+if [ "$mode" = user ] && [ ! -x "$here/out/mouse" ]; then
+  swiftc -O "$here/mouse.swift" -o "$here/out/mouse" || exit 1
+fi
+
 rm -f "$out/render_test.log"
 PLAYER_TEST_URL="$url" PLAYER_CANVAS="$canvas" RENDER_TEST_LOG="$out/render_test.log" \
+  PLAYER_TEST_USER=$([ "$mode" = user ] && echo 1 || echo 0) \
   "$app" >"$out/app.log" 2>&1 &
 pid=$!
 sleep 3
@@ -28,7 +35,13 @@ shot=0
 for _ in $(seq 1 150); do
   if [ $shot -eq 0 ] && grep -q "PHASE play" "$out/render_test.log" 2>/dev/null; then
     sleep 4
-    screencapture -x "$out/shot.png" && shot=1
+    screencapture -x "$out/shot.png"
+    shot=1
+    if [ "$mode" = user ]; then
+      python3 "$here/user_drive.py" "$out/render_test.log" "$here/out/mouse" \
+        2>&1 | tee "$out/drive.log"
+      break
+    fi
   fi
   kill -0 $pid 2>/dev/null || break
   sleep 1
