@@ -634,7 +634,13 @@ ytm-pivot-bar-renderer, .mobile-topbar-header, ytm-app-promo-renderer,
     const errBox = document.querySelector('.ytp-error-content-wrap-reason, .ytp-error .ytp-error-content');
     if (errBox && errBox.offsetParent !== null) err = errBox.innerText.trim() || 'Playback error';
     // Resume if YouTube paused on its own (e.g. "are you still watching?").
-    if (el && el.paused && wantPlaying && !el.ended && !ad && el.readyState >= 2) {
+    // Workaround (bug 20): not while the video is seeking or YouTube's
+    // player is buffering (state 3), as it is after a seek until the new
+    // spot has loaded. Forcing play then could leave macOS playing slowly
+    // with no sound, or loading forever.
+    const ytState = p && p.getPlayerState ? p.getPlayerState() : null;
+    if (el && el.paused && wantPlaying && !el.ended && !ad && el.readyState >= 2 &&
+        !el.seeking && ytState !== 3) {
       el.play().catch(() => {});
     }
     const state = {
