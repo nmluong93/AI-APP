@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -120,7 +122,8 @@ class BackgroundVideoHost extends StatelessWidget {
         Positioned.fill(child: child),
         ValueListenableBuilder<Object?>(
           valueListenable: VideoHosts.owner,
-          builder: (context, owner, _) => identical(owner, VideoHosts.background)
+          builder: (context, owner, _) =>
+              identical(owner, VideoHosts.background)
               ? const Positioned(
                   left: 0,
                   top: 0,
@@ -151,10 +154,38 @@ class VideoSurface extends StatefulWidget {
   State<VideoSurface> createState() => _VideoSurfaceState();
 }
 
+/// Painted over the video on macOS so clicks reach the app (bug 19).
+@visibleForTesting
+const clickShieldColor = Color(0x01000000);
+
+/// The seek bar and Play/Pause button of the (not full screen) player in test
+/// builds, so the macOS user test (`_seekTest` in lib/main.dart) can find
+/// them on screen.
+final seekBarKey = GlobalKey(debugLabel: 'seekBar');
+final playButtonKey = GlobalKey(debugLabel: 'playButton');
+
 class _VideoSurfaceState extends State<VideoSurface> {
   final _c = PlaybackController.instance;
+
+  /// The controls are left out of render-test builds, except for the macOS
+  /// user test, which clicks them (PLAYER_TEST_USER, `_seekTest`).
+  static final _showOverlay =
+      !const bool.fromEnvironment('PLAYER_TEST') ||
+      Platform.environment['PLAYER_TEST_USER'] == '1';
+
+  /// Only test builds tag the controls: when a player page replaces another,
+  /// both are on screen for a moment, and two widgets can't share a key.
+  bool get _testKeys =>
+      const bool.fromEnvironment('PLAYER_TEST') && !widget.fullscreen;
+
+  /// On a Mac the mouse, not touch, drives the controls.
+  bool get _desktop => defaultTargetPlatform == TargetPlatform.macOS;
   bool _controlsVisible = true;
   Timer? _hideTimer;
+
+  /// Where the seek bar is being dragged to, in milliseconds; null when it
+  /// isn't being dragged.
+  double? _dragMs;
 
   @override
   void initState() {
@@ -180,6 +211,11 @@ class _VideoSurfaceState extends State<VideoSurface> {
   void _toggleControls() {
     setState(() => _controlsVisible = !_controlsVisible);
     if (_controlsVisible) _scheduleHide();
+  }
+
+  void _showControls() {
+    if (!_controlsVisible) setState(() => _controlsVisible = true);
+    _scheduleHide();
   }
 
   Future<void> _openFullscreen() async {
@@ -243,13 +279,27 @@ class _VideoSurfaceState extends State<VideoSurface> {
             children: [
               if (showWebView) const PlayerWebView(),
               // Covers the page so it never gets touches.
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: _toggleControls,
-                onDoubleTap: () => _c.playOrPause(),
-                onLongPress: _showDiagnostics,
+              MouseRegion(
+                onHover: _desktop ? (_) => _showControls() : null,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: _toggleControls,
+                  onDoubleTap: () => _c.playOrPause(),
+                  onLongPress: _showDiagnostics,
+                  // Workaround (bug 19 in the README "Known bugs and
+                  // workarounds"): on macOS a click over the WebView goes
+                  // to the page, not to Flutter, unless Flutter painted
+                  // something at that spot. The gesture layer paints
+                  // nothing, so once the controls faded out every click
+                  // went to the page and they could never be brought
+                  // back. A practically invisible tint makes the whole
+                  // video count as Flutter's.
+                  child: _desktop
+                      ? const ColoredBox(color: clickShieldColor)
+                      : null,
+                ),
               ),
-              if (!const bool.fromEnvironment('PLAYER_TEST'))
+              if (_showOverlay)
                 ValueListenableBuilder<YtPlayerState>(
                   valueListenable: _c.player,
                   builder: (context, s, _) => _overlay(context, s),
@@ -325,6 +375,7 @@ class _VideoSurfaceState extends State<VideoSurface> {
                     _scheduleHide();
                   },
                   size: 56,
+                  key: _testKeys ? playButtonKey : null,
                 ),
                 const SizedBox(width: 24),
                 _iconButton(Icons.forward_10, () {
@@ -341,15 +392,27 @@ class _VideoSurfaceState extends State<VideoSurface> {
             child: Row(
               children: [
                 Text(
-                  '${formatDuration(Duration(milliseconds: pos))} / ${formatDuration(s.duration)}',
+                  '${formatDuration(Duration(milliseconds: _dragMs?.round() ?? pos))} / ${formatDuration(s.duration)}',
                   style: const TextStyle(color: Colors.white, fontSize: 12),
                 ),
                 Expanded(
+                  // Workaround (bug 20): seeks only once, where the drag
+                  // ends. Seeking on every step of a drag sent the page
+                  // dozens of seeks a second, and on macOS the video could
+                  // be left loading forever.
                   child: Slider(
-                    value: pos.toDouble(),
+                    key: _testKeys ? seekBarKey : null,
+                    value: _dragMs ?? pos.toDouble(),
                     max: total > 0 ? total.toDouble() : 1,
                     onChanged: total > 0
                         ? (v) {
+                            setState(() => _dragMs = v);
+                            _scheduleHide();
+                          }
+                        : null,
+                    onChangeEnd: total > 0
+                        ? (v) {
+                            setState(() => _dragMs = null);
                             _c.player.seek(Duration(milliseconds: v.round()));
                             _scheduleHide();
                           }
@@ -374,8 +437,10 @@ class _VideoSurfaceState extends State<VideoSurface> {
     IconData icon,
     VoidCallback onPressed, {
     double size = 28,
+    Key? key,
   }) {
     return IconButton(
+      key: key,
       iconSize: size,
       color: Colors.white,
       icon: Icon(icon),

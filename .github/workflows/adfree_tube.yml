@@ -24,8 +24,11 @@ defaults:
 #              it keeps playing in the background and with the screen off
 #   downloads-android -> the app on an Android emulator downloading a video
 #              as MP4 and MP3 with its own yt-dlp and ffmpeg
-#   android -> the APK, only after all of the above pass
-#   macos   -> the Mac app, only after test passes
+#   macos-render -> the app on a Mac against the YouTube-like page, checking
+#              that the video plays and plays on after seeking (and, for
+#              information, the same on a real YouTube video)
+#   android -> the APK, only after test, render and downloads-android pass
+#   macos   -> the Mac app, only after test and macos-render pass
 #   ci-ok   -> the one check main requires: fails if any job above failed
 jobs:
   changes:
@@ -220,8 +223,52 @@ jobs:
           name: adfree-tube-android
           path: adfree_tube/build/app/outputs/flutter-apk/AdFreeTube.apk
 
-  macos:
+  macos-render:
     needs: test
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -q pillow
+      # The test page is served over plain http from the runner.
+      - run: plutil -insert NSAppTransportSecurity -json '{"NSAllowsArbitraryLoads":true}' macos/Runner/Info.plist
+      - run: flutter pub get
+      - run: >
+          flutter build macos --release
+          --dart-define=PLAYER_TEST=true
+          --dart-define=PLAYER_TEST_URL=http://127.0.0.1:8000/youtube_like.html
+      # What ships: the canvas on. These must pass.
+      - run: bash tool/render_test/run_macos.sh page-canvas http://127.0.0.1:8000/youtube_like.html true
+      # Each scenario runs even if an earlier one failed, to compare them.
+      - run: bash tool/render_test/run_macos.sh page-no-canvas http://127.0.0.1:8000/youtube_like.html false
+        if: success() || failure()
+      # As a user: the real mouse shows the controls, pauses, clicks and
+      # drags the seek bar, and plays again (tool/render_test/user_drive.py).
+      - run: bash tool/render_test/run_macos.sh page-user http://127.0.0.1:8000/youtube_like.html true user
+        if: success() || failure()
+      # For information: a real YouTube video, which has to be fetched after
+      # each seek. YouTube can refuse CI machines, so these may not pass.
+      - run: bash tool/render_test/run_macos.sh youtube-canvas https://m.youtube.com/watch?v=aqz-KE-bpKQ true
+        if: success() || failure()
+        continue-on-error: true
+      - run: bash tool/render_test/run_macos.sh youtube-no-canvas https://m.youtube.com/watch?v=aqz-KE-bpKQ false
+        if: success() || failure()
+        continue-on-error: true
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-render-results
+          path: adfree_tube/tool/render_test/out
+          if-no-files-found: ignore
+
+  macos:
+    needs: [test, macos-render]
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -233,14 +280,21 @@ jobs:
       - run: |
           cd build/macos/Build/Products/Release
           ditto -c -k --keepParent "AdFree Tube.app" AdFreeTube-macos.zip
+          # A disk image too: open it and drag the app to Applications.
+          mkdir dmg && cp -R "AdFree Tube.app" dmg/ && ln -s /Applications dmg/Applications
+          hdiutil create -volname "AdFree Tube" -srcfolder dmg -ov -format UDZO AdFreeTube-macos.dmg
       - uses: actions/upload-artifact@v4
         with:
           name: adfree-tube-macos
           path: adfree_tube/build/macos/Build/Products/Release/AdFreeTube-macos.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: adfree-tube-macos-dmg
+          path: adfree_tube/build/macos/Build/Products/Release/AdFreeTube-macos.dmg
 
   ci-ok:
     name: AdFree Tube CI passed
-    needs: [changes, test, render, downloads-android, android, macos]
+    needs: [changes, test, render, downloads-android, android, macos-render, macos]
     if: always()
     runs-on: ubuntu-latest
     steps:

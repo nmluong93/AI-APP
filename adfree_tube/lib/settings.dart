@@ -63,6 +63,9 @@ class AppSettings extends ChangeNotifier {
 
   /// Workaround (bug 7): copy video frames into a page canvas instead of
   /// relying on the video layer. See `drawFrame()` in yt_web_player.dart.
+  ///
+  /// Needed on macOS too: with both workarounds off, real YouTube videos
+  /// showed black there (bug 20).
   bool get canvasVideo => _prefs.getBool('canvasVideo') ?? true;
 
   set canvasVideo(bool value) {

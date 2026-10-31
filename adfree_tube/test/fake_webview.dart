@@ -1,11 +1,13 @@
-import 'dart:ui';
-
+import 'package:flutter/widgets.dart';
 import 'package:webview_flutter_platform_interface/webview_flutter_platform_interface.dart';
 
 /// Stands in for the real WebView so screens that create the player can be
 /// tested. Every call does nothing.
 class FakeWebViewPlatform extends WebViewPlatform {
   static void install() => WebViewPlatform.instance = FakeWebViewPlatform();
+
+  /// Every script the app ran on a page, oldest first.
+  static final scripts = <String>[];
 
   @override
   PlatformWebViewController createPlatformWebViewController(
@@ -16,6 +18,18 @@ class FakeWebViewPlatform extends WebViewPlatform {
   PlatformNavigationDelegate createPlatformNavigationDelegate(
     PlatformNavigationDelegateCreationParams params,
   ) => _FakeNavigationDelegate(params);
+
+  @override
+  PlatformWebViewWidget createPlatformWebViewWidget(
+    PlatformWebViewWidgetCreationParams params,
+  ) => _FakeWidget(params);
+}
+
+class _FakeWidget extends PlatformWebViewWidget {
+  _FakeWidget(super.params) : super.implementation();
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.expand();
 }
 
 class _FakeController extends PlatformWebViewController {
@@ -40,7 +54,8 @@ class _FakeController extends PlatformWebViewController {
   @override
   Future<void> loadHtmlString(String html, {String? baseUrl}) async {}
   @override
-  Future<void> runJavaScript(String javaScript) async {}
+  Future<void> runJavaScript(String javaScript) async =>
+      FakeWebViewPlatform.scripts.add(javaScript);
   @override
   Future<Object> runJavaScriptReturningResult(String javaScript) async => '';
 }

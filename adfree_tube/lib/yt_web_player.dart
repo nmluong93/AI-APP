@@ -108,13 +108,21 @@ class YtWebPlayer extends ValueNotifier<YtPlayerState> {
   /// Extra lines added to [diagnostics], e.g. the display mode in use.
   String Function()? diagnosticsHeader;
   String? _videoId;
+  String? _testHost;
   double _volume = 1;
 
   // A mobile browser user agent, so YouTube serves its mobile site (whose
   // player we know how to clean up) on macOS too.
-  static const _userAgent =
-      'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 '
-      '(KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36';
+  // Workaround (bug 20): on macOS it names Safari on an iPhone, the engine the
+  // page really runs in. Told it was Chrome, YouTube streamed the video the
+  // way it does for Chrome, which WebKit stalled on: sound but no picture,
+  // and after a seek it kept loading.
+  static String get _userAgent => Platform.isMacOS
+      ? 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) '
+            'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 '
+            'Mobile/15E148 Safari/604.1'
+      : 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 '
+            '(KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36';
 
   static PlatformWebViewControllerCreationParams _params() {
     if (WebViewPlatform.instance is WebKitWebViewPlatform) {
@@ -164,7 +172,11 @@ class YtWebPlayer extends ValueNotifier<YtPlayerState> {
               host.endsWith('youtube.com') ||
               host.endsWith('google.com') ||
               host.endsWith('gstatic.com') ||
-              host.endsWith('googlevideo.com');
+              host.endsWith('googlevideo.com') ||
+              // The page the render test opened (see [loadUrl]). WebKit asks
+              // about pages the app loads itself too, so without this the
+              // macOS test page was blocked.
+              host == _testHost;
           return allowed && request.isMainFrame || !request.isMainFrame
               ? NavigationDecision.navigate
               : NavigationDecision.prevent;
@@ -206,6 +218,7 @@ class YtWebPlayer extends ValueNotifier<YtPlayerState> {
   /// Opens any page. Only used by the on-device rendering test.
   Future<void> loadUrl(String url) async {
     _videoId = 'test';
+    _testHost = Uri.parse(url).host;
     await controller.loadRequest(Uri.parse(url));
   }
 
@@ -628,7 +641,13 @@ ytm-pivot-bar-renderer, .mobile-topbar-header, ytm-app-promo-renderer,
     const errBox = document.querySelector('.ytp-error-content-wrap-reason, .ytp-error .ytp-error-content');
     if (errBox && errBox.offsetParent !== null) err = errBox.innerText.trim() || 'Playback error';
     // Resume if YouTube paused on its own (e.g. "are you still watching?").
-    if (el && el.paused && wantPlaying && !el.ended && !ad && el.readyState >= 2) {
+    // Workaround (bug 20): not while the video is seeking or YouTube's
+    // player is buffering (state 3), as it is after a seek until the new
+    // spot has loaded. Forcing play then could leave macOS playing slowly
+    // with no sound, or loading forever.
+    const ytState = p && p.getPlayerState ? p.getPlayerState() : null;
+    if (el && el.paused && wantPlaying && !el.ended && !ad && el.readyState >= 2 &&
+        !el.seeking && ytState !== 3) {
       el.play().catch(() => {});
     }
     const state = {

@@ -110,6 +110,21 @@ try {
     await page.waitForTimeout(500);
     check(`${tag}: play resumes`, await page.evaluate(() => !document.querySelector('video').paused));
 
+    // Bug 20: while YouTube's player is buffering (state 3, as after a seek)
+    // the script mustn't force the video to play; once YouTube reports it
+    // paused by itself (state 2), it resumes.
+    await page.evaluate(() => {
+      window.__ytState = 3;
+      document.getElementById('movie_player').getPlayerState = () => window.__ytState;
+      document.querySelector('video').pause();
+    });
+    await page.waitForTimeout(800);
+    check(`${tag}: no forced play while YouTube is buffering`, await page.evaluate(() => document.querySelector('video').paused));
+    await page.evaluate(() => { window.__ytState = 2; });
+    await page.waitForTimeout(800);
+    check(`${tag}: resumes once YouTube says it paused by itself`, await page.evaluate(() => !document.querySelector('video').paused));
+    await page.evaluate(() => { delete document.getElementById('movie_player').getPlayerState; });
+
     const perf = JSON.parse(await page.evaluate('window.__adfree.debug()')).perf;
     check(`${tag}: debug() reports frame timing`, perf && perf.fps > 10 && typeof perf.waitingEvents === 'number', JSON.stringify(perf));
     if (canvasVideo) {
