@@ -18,15 +18,6 @@ void main() {
     expect(s.pageDrawnVideo, isTrue);
   });
 
-  // Bug 20: they are for Android phones; on a Mac they only cost speed.
-  testWidgets('on macOS the black-video workarounds start off', (tester) async {
-    final s = AppSettings.instance;
-    expect(s.canvasVideo, isFalse);
-    expect(s.pageDrawnVideo, isFalse);
-    s.canvasVideo = true;
-    expect(s.canvasVideo, isTrue);
-  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
-
   test('settings persist and notify listeners', () async {
     final s = AppSettings.instance;
     var notified = 0;

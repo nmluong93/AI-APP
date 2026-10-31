@@ -54,10 +54,7 @@ class AppSettings extends ChangeNotifier {
   /// Workaround (bug 7): keep the WebView from moving the video to a
   /// separate hardware layer, by making it very slightly transparent and
   /// rotated by a tiny angle. See `keepVisible()` in yt_web_player.dart.
-  ///
-  /// Off by default on macOS, whose WebKit doesn't have this problem and
-  /// may have to draw a slightly rotated video the slow way (bug 20).
-  bool get pageDrawnVideo => _prefs.getBool('pageDrawnVideo') ?? !_macOS;
+  bool get pageDrawnVideo => _prefs.getBool('pageDrawnVideo') ?? true;
 
   set pageDrawnVideo(bool value) {
     _prefs.setBool('pageDrawnVideo', value);
@@ -67,11 +64,9 @@ class AppSettings extends ChangeNotifier {
   /// Workaround (bug 7): copy video frames into a page canvas instead of
   /// relying on the video layer. See `drawFrame()` in yt_web_player.dart.
   ///
-  /// Off by default on macOS, which shows web video fine and would only
-  /// spend time copying every frame (bug 20).
-  bool get canvasVideo => _prefs.getBool('canvasVideo') ?? !_macOS;
-
-  static bool get _macOS => defaultTargetPlatform == TargetPlatform.macOS;
+  /// Needed on macOS too: with both workarounds off, real YouTube videos
+  /// showed black there (bug 20).
+  bool get canvasVideo => _prefs.getBool('canvasVideo') ?? true;
 
   set canvasVideo(bool value) {
     _prefs.setBool('canvasVideo', value);
