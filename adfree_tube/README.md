@@ -204,6 +204,7 @@ adfree_tube/
 ├── tool/page_script_test/       Browser test of the injected page script + YouTube-like test page
 ├── tool/render_test/            Emulator video and background-playback check (`render` CI job), and the Mac play-and-seek check (`macos-render`)
 ├── tool/download_test/          Sample video and the emulator download check (`downloads-android` CI job)
+├── tool/soak_test/              Longer real-user playback scenarios on the emulator (soak workflow)
 ├── pubspec.yaml                  Dependencies and app version
 ├── pubspec.lock                  Exact resolved dependency versions (commit it)
 └── analysis_options.yaml         Lint rules used by `flutter analyze`
@@ -509,6 +510,7 @@ Tests gate the builds: no APK or Mac app is produced unless they pass.
 | `render` CI job (`tool/render_test/`) | The whole app on an Android emulator: the video really appears on screen, in both display modes, and keeps playing (`background.py` requires the position to advance at least 0.7 s per second) on the player, after leaving it, after Home, and with the screen off. A run with the fix switched off (`bgfix=false`) shows the bug | CI only (needs KVM) |
 | `macos-render` CI job (`tool/render_test/run_macos.sh`) | The whole app on a Mac: the video plays, and after a seek, a burst of 30 seeks (what dragging the seek bar used to send) and a seek back, it lands where it was sent within 6 s and plays on at least 0.6 s per second (`seek_check.py`). Runs on the test page with the canvas on and off (must pass), and on a real YouTube video (information only) | CI only (needs a Mac runner) |
 | `downloads-android` CI job (`tool/download_test/`) | The app's own yt-dlp and ffmpeg download and save an MP4 and an MP3 on Android | CI only (needs KVM) |
+| Soak workflow (`adfree_tube_soak.yml`, `tool/soak_test/`) | Real-user sessions on an Android emulator: pause and resume from the headset/notification controls (10 s, 1 min, 5 min, and while locked), lock and unlock (1 and 5 min), switching to Settings, Home and Recents and back 8 times, and a long play (10 min by default). `check.py` fails a run if the video doesn't keep up (75% of real time), stalls over 6 s, takes over 5 s to resume, moves while paused, shows a black frame after unlocking or coming back, or the app crashes or restarts. It also reports dropped frames and memory. The job summary has a table of every phase; logs, screenshots and `metrics.json` are in the `soak-test-results` artifact | Actions tab > **AdFree Tube soak test** > Run workflow (CI only, needs KVM) |
 
 Add a test with every bug fix, so the bug can't come back unnoticed.
 

@@ -52,13 +52,19 @@ Future<void> _renderTest(String url) async {
   c.startRenderTest();
   if (Platform.isMacOS) return _seekTest(c, url);
   await c.player.loadUrl(url);
-  // Log where the video is every 3 seconds, whatever the app is doing.
-  Timer.periodic(const Duration(seconds: 3), (_) async {
+  // Log where the video is every 3 seconds (every second for the soak test,
+  // tool/soak_test), whatever the app is doing, with the duration and frame
+  // counts so the soak test can follow loops and count dropped frames.
+  const logMs = int.fromEnvironment('PLAYER_TEST_LOG_MS', defaultValue: 3000);
+  Timer.periodic(const Duration(milliseconds: logMs), (_) async {
     try {
       final r = await c.player.controller
           .runJavaScriptReturningResult(
-            "(function(){const v=document.querySelector('video');"
-            "return v?('t='+v.currentTime.toFixed(2)+' paused='+v.paused):'none'})()",
+            "(function(){const v=document.querySelector('video');if(!v)return 'none';"
+            "const q=v.getVideoPlaybackQuality?v.getVideoPlaybackQuality():null;"
+            "return 't='+v.currentTime.toFixed(2)+' paused='+v.paused+"
+            "' d='+(v.duration||0).toFixed(2)+' rs='+v.readyState+"
+            "(q?' frames='+q.totalVideoFrames+' dropped='+q.droppedVideoFrames:'')})()",
           )
           .timeout(const Duration(seconds: 2));
       debugPrint('RENDER_TEST pos $r');
