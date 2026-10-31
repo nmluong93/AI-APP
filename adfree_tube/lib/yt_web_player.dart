@@ -113,9 +113,16 @@ class YtWebPlayer extends ValueNotifier<YtPlayerState> {
 
   // A mobile browser user agent, so YouTube serves its mobile site (whose
   // player we know how to clean up) on macOS too.
-  static const _userAgent =
-      'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 '
-      '(KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36';
+  // Workaround (bug 20): on macOS it names Safari on an iPhone, the engine the
+  // page really runs in. Told it was Chrome, YouTube streamed the video the
+  // way it does for Chrome, which WebKit stalled on: sound but no picture,
+  // and after a seek it kept loading.
+  static String get _userAgent => Platform.isMacOS
+      ? 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) '
+            'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 '
+            'Mobile/15E148 Safari/604.1'
+      : 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 '
+            '(KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36';
 
   static PlatformWebViewControllerCreationParams _params() {
     if (WebViewPlatform.instance is WebKitWebViewPlatform) {
