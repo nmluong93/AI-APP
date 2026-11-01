@@ -151,7 +151,14 @@ pid=$!
 mark "gap:start"
 sleep 5
 foreground
-sleep 25
+# The page takes about 35 s to show its video on a CI Mac; start the
+# scenarios only once it is playing (3 minutes at most), so the first phase
+# doesn't count the start-up as a stall.
+for _ in $(seq 1 180); do
+  grep -q "RENDER_TEST pos t=.* paused=false" "$log" 2>/dev/null && break
+  sleep 1
+done
+sleep 5
 shot start 0
 echo "app pid at start: $pid"
 memory
