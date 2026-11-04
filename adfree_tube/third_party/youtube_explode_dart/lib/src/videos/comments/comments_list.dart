@@ -14,6 +14,10 @@ class CommentsList extends BasePagedList<Comment> {
   /// See [SearchList]
   CommentsList(super.base, this.totalLength, this._client, this._httpClient);
 
+  /// AdFree Tube patch (bug 20): false on the last page, so the app can
+  /// stop offering more.
+  bool get hasNextPage => _client.hasNextPage;
+
   /// Fetches the next batch of videos or returns null if there are no more
   /// results.
   @override

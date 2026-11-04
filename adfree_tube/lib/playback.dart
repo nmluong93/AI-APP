@@ -4,6 +4,7 @@ import 'package:audio_service/audio_service.dart';
 import 'package:flutter/widgets.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart' as yt;
 
+import 'comments.dart';
 import 'settings.dart';
 import 'youtube_service.dart';
 import 'yt_web_player.dart';
@@ -121,6 +122,9 @@ class PlaybackController extends ChangeNotifier {
   String? videoId;
   yt.Video? video;
   List<yt.Video> related = const [];
+
+  /// Comments of [video]; they load in the background on their own.
+  VideoComments? comments;
   String? error;
   int _loadToken = 0;
   bool _qualityApplied = false;
@@ -135,6 +139,7 @@ class PlaybackController extends ChangeNotifier {
     videoId = id;
     video = null;
     related = const [];
+    _setComments(null);
     error = null;
     _qualityApplied = false;
     _resume.reset();
@@ -144,6 +149,9 @@ class PlaybackController extends ChangeNotifier {
       final v = await _service.getVideo(id);
       if (token != _loadToken) return;
       video = v;
+      // Not awaited: comments arrive whenever they do, in parallel with
+      // Up next, and never hold up the player or the details.
+      _setComments(VideoComments(v)..load());
       notifyListeners();
       _handler?.setMedia(v);
       AppSettings.instance
@@ -156,6 +164,11 @@ class PlaybackController extends ChangeNotifier {
       // Details are optional; the player itself may still work.
       debugPrint('Could not load video details: $e');
     }
+  }
+
+  void _setComments(VideoComments? next) {
+    comments?.dispose();
+    comments = next;
   }
 
   YtPlayerState _last = const YtPlayerState();
@@ -213,6 +226,7 @@ class PlaybackController extends ChangeNotifier {
     videoId = null;
     video = null;
     related = const [];
+    _setComments(null);
     error = null;
     notifyListeners();
     await _handler?.clear();

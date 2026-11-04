@@ -55,6 +55,7 @@ This README covers two kinds of readers:
 | Sleep timer | Pauses after 5 min to 2 h (or a custom time), fading out the volume first |
 | History | The last 200 videos you opened |
 | Up next | Related videos under the player |
+| Comments | The video's YouTube comments (text, likes, reply count, creator heart), loaded in the background so the player never waits. Listed under the description on wide windows; on phones a preview opens the full list, which loads more as you scroll |
 | Adaptive layout | Side-by-side layout on wide windows (Mac), stacked on phones |
 | Theme | Light/dark, following the system |
 
@@ -87,7 +88,8 @@ WebView, and strips everything else away:
 
 1. **Finding videos.** The
    [`youtube_explode_dart`](https://pub.dev/packages/youtube_explode_dart)
-   package searches YouTube and reads video details and related videos.
+   package searches YouTube and reads video details, related videos and
+   comments.
    (It is no longer used for playback.)
 2. **Playing.** `lib/yt_web_player.dart` (`YtWebPlayer`) owns a
    [`webview_flutter`](https://pub.dev/packages/webview_flutter) WebView that
@@ -159,7 +161,7 @@ The main packages used:
 
 | Package | Why it's here |
 | --- | --- |
-| `youtube_explode_dart` | Search, video details and related videos |
+| `youtube_explode_dart` | Search, video details, related videos and comments |
 | `webview_flutter` (+ `_android`, `_wkwebview`) | The WebView that runs YouTube's player |
 | `audio_service` | Background playback service and OS media controls |
 | `shared_preferences` | Small key-value storage for settings and history |
@@ -175,14 +177,15 @@ adfree_tube/
 │   ├── home_page.dart            Home (topic feed + search), History screen, Settings screen
 │   ├── topic_feed.dart           TopicFeed: newest videos for the saved topics, cached between launches
 │   ├── topics_page.dart          "Your topics" screen: add, remove and suggested topics
-│   ├── player_page.dart          Player screen: video, quality picker, description, Up next
+│   ├── player_page.dart          Player screen: video, quality picker, description, comments, Up next
+│   ├── comments.dart             VideoComments (a video's comments, paged in the background) and their widgets
 │   ├── player_view.dart          VideoSurface (WebView + app controls) and fullscreen
 │   ├── yt_web_player.dart        YtWebPlayer: the YouTube page, injected CSS/JS, state
 │   ├── mini_player.dart          Bottom "now playing" bar shown on other screens
 │   ├── sleep_timer.dart          Sleep-timer button and picker sheet
 │   ├── playback.dart             PlaybackController (the one app-wide player),
 │   │                             background handling, sleep timer, OS media controls
-│   ├── youtube_service.dart      Search, video details, related videos
+│   ├── youtube_service.dart      Search, video details, related videos, comments
 │   ├── search_input.dart         What the search bar text means: a link/id to open or words to search
 │   ├── settings.dart             Saved preferences (default quality), watch history, topics, feed cache
 │   ├── downloads/                Downloads: queue (Downloader), Android and Mac versions,
@@ -438,6 +441,8 @@ the bar (or Back on Android) to return to your topic feed.
 - **Quality button:** choose a resolution or *Auto*. Playback continues from
   the same spot.
 - Tap the **description** to expand it. **Up next** shows related videos.
+- **Comments** appear under the description once YouTube sends them. On a
+  phone, tap the preview to see them all; more load as you scroll.
 
 **Background playback.** Just leave the player: go back to search, switch
 apps, or lock the screen, and playback continues.
@@ -723,6 +728,7 @@ word before you change or remove anything.
 | 17 | After switching away and back, the player shows 0:00 / 0:00 and won't play (Galaxy S23) | Not certain: the page's YouTube player loses its video. The first bug 16 reset went through YouTube's own `seekTo`, which may have triggered it | `api.refresh()` now only nudges the `<video>` itself when the spot is buffered. `ResumePoint` (`lib/yt_web_player.dart`) remembers the position; if the video is lost, coming back to the app or pressing Play loads it again from there (`PlaybackController` in `lib/playback.dart`); `test/resume_point_test.dart` |
 | 18 | The media notification can't be closed, even after leaving the app | Stop waited for the page to clear before removing the notification, so a page that didn't answer blocked it; and the playback service is kept in the foreground on purpose (bug 8), so it outlived the app | Stop clears the app and the notification first and gives up on the page after 3 s; swiping the app away from Recents stops playback (`_MediaHandler.onTaskRemoved`) |
 | 19 | macOS: the progress bar and Play/Pause button disappear a few seconds into a video and never come back, so the video can't be paused | On macOS, Flutter sends a click over a platform view (the WebView) to that view unless Flutter painted something at that spot. The full-size gesture layer paints nothing, so once the controls faded out every click went to the YouTube page instead of the app | On macOS the gesture layer paints a practically invisible tint (`clickShieldColor`), and moving the mouse over the video shows the controls (`VideoSurface` in `lib/player_view.dart`); `test/player_controls_test.dart` |
+| 20 | Comments never load | youtube_explode_dart 3.1.0 only reads YouTube's old comment format; YouTube now sends each comment as a `commentViewModel` holding keys, with the text, author and counts in `frameworkUpdates` | The patched copy (search for *AdFree Tube patch*, `comments_client.dart`) reads both formats, skips a comment it can't read, and tells the app when there are no more pages; `test/comments_test.dart` |
 | 20 | macOS: after a seek the video keeps loading, or plays slowly with no sound; sometimes sound but a black picture | The app told YouTube it was Chrome on Android while the page really runs in Safari's engine (WebKit). The diagnostics showed the `<video>` stuck at `readyState` 1 with no decoded frames, before and after a seek, while YouTube's player said it was buffering; naming Safari fixed it on a real Mac. Earlier suspects, also fixed: dragging the seek bar sent the page a seek on every step of the drag, dozens a second; the page script forced the `<video>` to play while YouTube was still loading the new spot; and the Android-only black-video workarounds (canvas copy, 0.99 opacity and a tiny rotation) can make WebKit draw video the slow way | On macOS the app now says it is Safari on an iPhone (`_userAgent` in `lib/yt_web_player.dart`), so YouTube streams the way it does for WebKit. The seek bar only seeks where the drag ends; the script no longer forces play while the video is seeking or YouTube's player is buffering (state 3; `tick()` in `_script`, checked by `tool/page_script_test/test.mjs`). Turning the canvas and *Keep video drawn in the page* off on macOS made real YouTube videos black there, so they stay on (`VideoSurface` in `lib/player_view.dart`; `test/player_controls_test.dart`). The `macos-render` CI job plays and seeks on a real Mac, including a burst of seeks like the old drag, with the canvas on and off, on the test page and (for information) on a real YouTube video (`_seekTest` in `lib/main.dart`, `tool/render_test/run_macos.sh`), and once as a user with the real mouse on the controls (`user_drive.py`) |
 
 ### Bug 7: black picture with sound on Android

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'comments.dart';
 import 'downloads/downloads_page.dart';
 import 'playback.dart';
 import 'sleep_timer.dart';
@@ -113,6 +114,16 @@ class _PlayerPageState extends State<PlayerPage> {
                 ),
               const SizedBox(height: 12),
               _Description(text: video.description),
+              if (_c.comments != null) ...[
+                const SizedBox(height: 12),
+                // Wide windows have room for the list itself; phones get
+                // a preview that opens the list, so Up next stays close.
+                CommentsSection(
+                  key: ObjectKey(_c.comments),
+                  comments: _c.comments!,
+                  preview: !wide,
+                ),
+              ],
             ],
           );
 
