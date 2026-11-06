@@ -12,10 +12,22 @@ class CommentsClient {
 
   late final List<JsonMap>? _commentRenderers = _getCommentRenderers();
 
-  late final List<_Comment>? comments =
-      _commentRenderers?.map((e) => _Comment(e)).toList(growable: false);
+  // AdFree Tube patch (bug 20 in its README): YouTube now sends each
+  // comment as a commentViewModel that only holds keys, with the author,
+  // text and counts in frameworkUpdates/entityBatchUpdate/mutations. Read
+  // both that and the old commentRenderer, and skip a comment that can't
+  // be read rather than failing the whole page.
+  late final Map<String, JsonMap> _entities = _getEntities();
+
+  late final List<_Comment>? comments = _commentRenderers
+      ?.map((e) => _Comment.tryParse(e, _entities))
+      .whereType<_Comment>()
+      .toList(growable: false);
 
   late final String? _continuationToken = _getContinuationToken();
+
+  /// AdFree Tube patch (bug 20): whether [nextPage] has anything to fetch.
+  bool get hasNextPage => _continuationToken != null;
 
   CommentsClient(this.root);
 
@@ -63,7 +75,8 @@ onResponseReceivedEndpoints[1].reloadContinuationItemsCommand.continuationItems[
       'appendContinuationItemsAction/continuationItems',
     );
     final comments = continuationItems
-        ?.where((e) => e['commentRenderer'] != null)
+        ?.where(
+            (e) => e['commentRenderer'] != null || e['commentViewModel'] != null)
         .toList(growable: false);
 
     if (comments?.isNotEmpty ?? false) {
@@ -83,10 +96,26 @@ onResponseReceivedEndpoints[1].reloadContinuationItemsCommand.continuationItems[
         const [];
   }
 
+  Map<String, JsonMap> _getEntities() {
+    final mutations = root.getJson<List<dynamic>>(
+      'frameworkUpdates/entityBatchUpdate/mutations',
+    );
+    final entities = <String, JsonMap>{};
+    for (final m in mutations ?? const []) {
+      if (m is! JsonMap) continue;
+      final payload = m.getJson<JsonMap>('payload');
+      final value = payload?.values.firstOrNull;
+      final key = m['entityKey'];
+      if (key is String && value is JsonMap) entities[key] = value;
+    }
+    return entities;
+  }
+
   String? _getContinuationToken() {
     final endpoints =
-        root.getJson<List<dynamic>>('onResponseReceivedEndpoints')!;
-    final last = endpoints.last as JsonMap;
+        root.getJson<List<dynamic>>('onResponseReceivedEndpoints');
+    final last = endpoints?.lastOrNull as JsonMap?;
+    if (last == null) return null;
     final items = last.getJson<List<dynamic>>(
       'appendContinuationItemsAction/continuationItems',
     );
@@ -112,15 +141,15 @@ onResponseReceivedEndpoints[1].reloadContinuationItemsCommand.continuationItems[
 
   // onResponseReceivedEndpoints[0].reloadContinuationItemsCommand.continuationItems[0].commentsHeaderRenderer
   int getCommentsCount() {
-    final firstEndpoint = root
-        .getJson<List<dynamic>>('onResponseReceivedEndpoints')!
-        .first as JsonMap;
-    return firstEndpoint
-            .getJson<String>(
-              'reloadContinuationItemsCommand/continuationItems/0/commentsHeaderRenderer/commentsCount/runs/0/text',
-            )
-            ?.parseIntWithUnits() ??
-        0;
+    final endpoints =
+        root.getJson<List<dynamic>>('onResponseReceivedEndpoints');
+    final header = (endpoints?.firstOrNull as JsonMap?)?.getJson<JsonMap>(
+      'reloadContinuationItemsCommand/continuationItems/0/commentsHeaderRenderer',
+    );
+    final text = header?.getJson<String>('countText/runs/0/text') ??
+        header?.getJson<String>('commentsCount/runs/0/text') ??
+        header?.getJson<String>('commentsCount/simpleText');
+    return parseCommentCount(text);
   }
 
   Future<CommentsClient?> nextPage(YoutubeHttpClient httpClient) async {
@@ -133,52 +162,125 @@ onResponseReceivedEndpoints[1].reloadContinuationItemsCommand.continuationItems[
   }
 }
 
+/// Reads a count as YouTube writes it on comments: "1,234", "1.2K",
+/// "3M", "12 Comments", or blank for none.
+int parseCommentCount(String? text) {
+  final match =
+      RegExp(r'(\d[\d,]*(?:\.\d+)?)\s*([KMB])?', caseSensitive: false)
+          .firstMatch(text ?? '');
+  if (match == null) return 0;
+  final number = double.tryParse(match.group(1)!.replaceAll(',', '')) ?? 0;
+  final multiplier = switch (match.group(2)?.toUpperCase()) {
+    'K' => 1000,
+    'M' => 1000000,
+    'B' => 1000000000,
+    _ => 1,
+  };
+  return (number * multiplier).round();
+}
+
 class _Comment {
-  final JsonMap root;
-
-  late final JsonMap _commentRenderer =
-      root.getJson<JsonMap>('commentRenderer') ??
-          root.getJson<JsonMap>('comment/commentRenderer')!;
-
-  late final JsonMap? _commentRepliesRenderer =
-      root.getJson<JsonMap>('replies/commentRepliesRenderer');
+  final String author;
+  final String channelId;
+  final String text;
+  final String publishTime;
+  final int? likeCount;
+  final int? repliesCount;
+  final bool isHearted;
 
   /// Used to get replies
-  late final String? continuation = _commentRepliesRenderer?.getJson<String>(
-    'contents/0/continuationItemRenderer/continuationEndpoint/continuationCommand/token',
-  );
+  final String? continuation;
 
-  late final int? repliesCount = _commentRenderer.getT<int>('replyCount');
+  _Comment._({
+    required this.author,
+    required this.channelId,
+    required this.text,
+    required this.publishTime,
+    required this.likeCount,
+    required this.repliesCount,
+    required this.isHearted,
+    required this.continuation,
+  });
 
-  late final String author =
-      _commentRenderer.getJson<String>('authorText/simpleText')!;
+  /// [root] is a commentThreadRenderer, or a reply (commentRenderer or
+  /// commentViewModel). Null if it can't be read.
+  static _Comment? tryParse(JsonMap root, Map<String, JsonMap> entities) {
+    try {
+      final comment = _parse(root, entities);
+      // The public Comment needs a valid ChannelId.
+      if (comment == null || !ChannelId.validateChannelId(comment.channelId)) {
+        return null;
+      }
+      return comment;
+    } catch (_) {
+      return null;
+    }
+  }
 
-  late final String channelThumbnail = (_commentRenderer
-          .getJson<List<dynamic>>('authorThumbnail/thumbnails')!
-          .last as JsonMap)
-      .getT<String>('url')!;
+  static _Comment? _parse(JsonMap root, Map<String, JsonMap> entities) {
+    {
+      final continuation = root.getJson<String>(
+        'replies/commentRepliesRenderer/contents/0/continuationItemRenderer/continuationEndpoint/continuationCommand/token',
+      );
+      final viewModel = root.getJson<JsonMap>('commentViewModel/commentViewModel') ??
+          root.getJson<JsonMap>('commentViewModel');
+      if (viewModel != null && viewModel['commentKey'] != null) {
+        return _fromEntities(viewModel, entities, continuation);
+      }
+      final renderer = root.getJson<JsonMap>('commentRenderer') ??
+          root.getJson<JsonMap>('comment/commentRenderer');
+      if (renderer == null) return null;
+      return _fromRenderer(renderer, continuation);
+    }
+  }
 
-  late final String channelId = _commentRenderer
-      .getJson<String>('authorEndpoint/browseEndpoint/browseId')!;
+  static _Comment? _fromEntities(
+    JsonMap viewModel,
+    Map<String, JsonMap> entities,
+    String? continuation,
+  ) {
+    final entity = entities[viewModel['commentKey']];
+    if (entity == null) return null;
+    final toolbarState = entities[viewModel['toolbarStateKey']] ??
+        entities[entity.getJson<String>('properties/toolbarStateKey')];
+    return _Comment._(
+      author: entity.getJson<String>('author/displayName') ?? '',
+      channelId: entity.getJson<String>('author/channelId') ?? '',
+      text: entity.getJson<String>('properties/content/content') ?? '',
+      publishTime: entity.getJson<String>('properties/publishedTime') ?? '',
+      likeCount: parseCommentCount(
+        entity.getJson<String>('toolbar/likeCountNotliked'),
+      ),
+      repliesCount:
+          parseCommentCount(entity.getJson<String>('toolbar/replyCount')),
+      isHearted:
+          toolbarState?['heartState'] == 'TOOLBAR_HEART_STATE_HEARTED',
+      continuation: continuation,
+    );
+  }
 
-  late final String text = _commentRenderer
-      .getJson<List<dynamic>>('contentText/runs')!
-      .cast<Map<dynamic, dynamic>>()
-      .parseRuns();
-
-  late final String publishTime =
-      _commentRenderer.getJson<String>('publishedTimeText/runs/0/text')!;
-
-  late final int? likeCount = _commentRenderer
-      .getJson<String>('voteCount/simpleText')
-      .parseIntWithUnits();
-
-  late final bool isHearted = _commentRenderer.getJson<JsonMap>(
-        'actionButtons/commentActionButtonsRenderer/creatorHeart',
-      ) !=
-      null;
-
-  _Comment(this.root);
+  static _Comment _fromRenderer(JsonMap renderer, String? continuation) =>
+      _Comment._(
+        author: renderer.getJson<String>('authorText/simpleText') ?? '',
+        channelId: renderer
+                .getJson<String>('authorEndpoint/browseEndpoint/browseId') ??
+            '',
+        text: renderer
+                .getJson<List<dynamic>>('contentText/runs')
+                ?.cast<Map<dynamic, dynamic>>()
+                .parseRuns() ??
+            '',
+        publishTime:
+            renderer.getJson<String>('publishedTimeText/runs/0/text') ?? '',
+        likeCount:
+            parseCommentCount(renderer.getJson<String>('voteCount/simpleText')),
+        repliesCount: renderer.getT<int>('replyCount'),
+        isHearted: renderer.getJson<JsonMap>(
+              'actionButtons/commentActionButtonsRenderer/creatorHeart',
+            ) !=
+            null,
+        continuation: continuation,
+      );
 
   @override
   String toString() => '$author: $text';

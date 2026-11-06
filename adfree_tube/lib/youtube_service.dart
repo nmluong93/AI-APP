@@ -3,7 +3,7 @@ import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 import 'search_input.dart';
 
-/// Search, video details and related videos, via youtube_explode_dart.
+/// Search, video details, related videos and comments, via youtube_explode_dart.
 /// Playback itself goes through YouTube's own player (see yt_web_player.dart).
 class YoutubeService {
   YoutubeService._(this._yt);
@@ -42,6 +42,14 @@ class YoutubeService {
       return const [];
     }
   }
+
+  /// The first page of [video]'s comments, or null if it has none or they
+  /// are turned off. Use [CommentsList.nextPage] for more.
+  Future<CommentsList?> comments(Video video) =>
+      // Marked deprecated upstream because YouTube's new comment format
+      // broke it; our patched copy reads that format (bug 20).
+      // ignore: deprecated_member_use
+      _yt.videos.commentsClient.getComments(video);
 
   void close() => _yt.close();
 }
