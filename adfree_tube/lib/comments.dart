@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart' as yt;
 
 import 'widgets.dart';
