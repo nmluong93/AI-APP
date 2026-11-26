@@ -3,7 +3,7 @@ import 'package:adfree_tube/playback.dart';
 import 'package:adfree_tube/settings.dart';
 import 'package:adfree_tube/yt_web_player.dart';
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
