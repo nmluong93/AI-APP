@@ -24,22 +24,32 @@ logger=$!
 mark() { adb shell log -t RENDER_TEST "PHASE $1"; echo "phase: $1"; }
 
 # A fresh emulator sometimes puts a system dialog (e.g. "Google isn't
-# responding") over the app, so close system dialogs, check the app is in
-# front, and try a second time before calling it a failure.
-for attempt in 1 2; do
+# responding") over the app, and right after boot it can be slow enough that
+# the video takes well over 14 s to show (Google Play services are still busy
+# setting up). So close system dialogs, take a screenshot every 3 s until the
+# video shows (up to 45 s), and try up to three launches before calling it a
+# failure. A launch that never shows the video is force-stopped before the
+# next one, but not the last: the background phases below still need the app.
+attempts=3
+for attempt in $(seq 1 $attempts); do
   adb logcat -c
   adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null
   adb shell am start -n com.luong.adfree_tube/.MainActivity
   mark start
-  sleep 14
-  adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null
+  render=1
+  for _ in $(seq 1 15); do
+    sleep 3
+    adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null
+    adb exec-out screencap -p > "$here/shot.png"
+    if python3 "$here/measure.py" "$here/shot.png" > "$here/result.txt"; then
+      render=0
+      break
+    fi
+  done
   echo "attempt $attempt, focused window: $(adb shell dumpsys window | grep -m1 mCurrentFocus)"
-  adb exec-out screencap -p > "$here/shot.png"
-  python3 "$here/measure.py" "$here/shot.png" > "$here/result.txt"
-  render=$?
   [ $render -eq 0 ] && break
   cat "$here/result.txt"
-  adb shell am force-stop com.luong.adfree_tube
+  [ "$attempt" -lt $attempts ] && adb shell am force-stop com.luong.adfree_tube
 done
 
 # What Android thinks of the app: alive, foreground service, priority
